@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台股多空雷達</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    body { background-color: #111827; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .animate-spin { animation: spin 1s linear infinite; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-in { animation: fadeIn 0.3s ease-out; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // ==========================================
+    // Lucide Icons (inline SVG)
+    // ==========================================
+    const Icon = ({ d, size = 20, className = '' }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        className={className}>
+        {(Array.isArray(d) ? d : [d]).map((path, i) => (
+          typeof path === 'string'
+            ? <path key={i} d={path} />
+            : React.createElement(path.tag || 'path', { key: i, ...path })
+        ))}
+      </svg>
+    );
+
+    const Icons = {
+      RefreshCw: ({ size, className }) => <Icon size={size} className={className} d={["M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8","M21 3v5h-5","M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16","M8 16H3v5"]} />,
+      ChevronDown: ({ size, className }) => <Icon size={size} className={className} d="m6 9 6 6 6-6" />,
+      ChevronUp: ({ size, className }) => <Icon size={size} className={className} d="m18 15-6-6-6 6" />,
+      Activity: ({ size, className }) => <Icon size={size} className={className} d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />,
+      Users: ({ size, className }) => <Icon size={size} className={className} d={["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2","M16 3.128a4 4 0 0 1 0 7.744","M22 21v-2a4 4 0 0 0-3-3.87",{tag:'circle',cx:'9',cy:'7',r:'4'}]} />,
+      PieChart: ({ size, className }) => <Icon size={size} className={className} d={["M21.21 15.89A10 10 0 1 1 8 2.83","M22 12A10 10 0 0 0 12 2v10z"]} />,
+      BarChart2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'line',x1:'18',y1:'20',x2:'18',y2:'10'},{tag:'line',x1:'12',y1:'20',x2:'12',y2:'4'},{tag:'line',x1:'6',y1:'20',x2:'6',y2:'14'},{tag:'line',x1:'2',y1:'20',x2:'22',y2:'20'}]} />,
+      TrendingUp: ({ size, className }) => <Icon size={size} className={className} d={["M22 7 13.5 15.5l-5-5L2 17","M16 7h6v6"]} />,
+      Globe: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20","M2 12h20"]} />,
+      Key: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'7.5',cy:'15.5',r:'5.5'},"M21 2l-9.6 9.6","M15.5 7.5l3 3L22 7l-3-3"]} />,
+      AlertCircle: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"M12 8v4","M12 16h.01"]} />,
+      CheckCircle2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"m9 12 2 2 4-4"]} />,
+    };
+
+    // ==========================================
+    // 1. 設定與工具函數
+    // ==========================================
+    const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
+
+    const MODULE_CONFIG = {
+      M1: { weight: 0.25, title: '權值股健康度', icon: 'Activity' },
+      M2: { weight: 0.25, title: '法人動向',     icon: 'Users' },
+      M3: { weight: 0.15, title: '籌碼面',       icon: 'PieChart' },
+      M4: { weight: 0.10, title: '量能結構',     icon: 'BarChart2' },
+      M5: { weight: 0.15, title: '技術面',       icon: 'TrendingUp' },
+      M6: { weight: 0.10, title: '外部環境',     icon: 'Globe' },
+    };
+
+    const SCORE_LABELS = [
+      { min: 80, label: '強烈看多', color: 'text-green-500', bg: 'bg-green-500' },
+      { min: 60, label: '偏多',     color: 'text-green-400', bg: 'bg-green-400' },
+      { min: 40, label: '中立觀望', color: 'text-yellow-500', bg: 'bg-yellow-500' },
+      { min: 20, label: '偏空',     color: 'text-red-400',   bg: 'bg-red-400' },
+      { min: 0,  label: '強烈看空', color: 'text-red-500',   bg: 'bg-red-500' },
+    ];
+
+    const calculateSMA = (data, period, key = 'close') =>
+      data.map((item, index) => {
+        if (index < period - 1) return { ...item, [`sma${period}`]: null };
+        let sum = 0;
+        for (let i = 0; i < period; i++) sum += data[index - i][key];
+        return { ...item, [`sma${period}`]: sum / period };
+      });
+
+    const calculateEMA = (data, period, key = 'close', emaKey) => {
+      const k = 2 / (period + 1);
+      let ema = data[0][key];
+      return data.map((item, index) => {
+        if (index === 0) return { ...item, [emaKey]: ema };
+        ema = item[key] * k + ema * (1 - k);
+        return { ...item, [emaKey]: ema };
+      });
+    };
+
+    const calculateMACD = (data) => {
+      let res = calculateEMA(data, 12, 'close', 'ema12');
+      res = calculateEMA(res, 26, 'close', 'ema26');
+      res = res.map(d => ({ ...d, dif: d.ema12 - d.ema26 }));
+      res = calculateEMA(res, 9, 'dif', 'macd');
+      return res.map(d => ({ ...d, osc: d.dif - d.macd }));
+    };
+
+    const getPastDateString = (monthsAgo) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - Math.floor(monthsAgo));
+      return d.toISOString().split('T')[0];
+    };
+
+    // ==========================================
+    // 2. SVG 圖表元件
+    // ==========================================
+    const SvgLineChart = ({ data, lines, height = 150 }) => {
+      if (!data || data.length === 0) return null;
+      let min = Infinity, max = -Infinity;
+      data.forEach(d => lines.forEach(line => {
+        if (d[line.key] != null) {
+          if (d[line.key] > max) max = d[line.key];
+          if (d[line.key] < min) min = d[line.key];
+        }
+      }));
+      const padding = (max === min) ? (max * 0.1 || 1) : (max - min) * 0.1;
+      max += padding; min -= padding;
+
+      const width = 1000;
+      const dx = data.length > 1 ? width / (data.length - 1) : width;
+
+      const getPath = (key) => {
+        let path = '', started = false;
+        data.forEach((d, i) => {
+          if (d[key] == null) return;
+          const x = i * dx;
+          const y = height - ((d[key] - min) / (max - min)) * height;
+          path += started ? `L ${x} ${y} ` : `M ${x} ${y} `;
+          started = true;
+        });
+        return path;
+      };
+
+      return (
+        <div className="relative w-full overflow-hidden text-xs" style={{ height }}>
+          <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+            {lines.map((line, i) => (
+              <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" />
+            ))}
+          </svg>
+          <div className="absolute top-0 left-0 text-gray-500 bg-gray-900/50 px-1 rounded">{max.toFixed(2)}</div>
+          <div className="absolute bottom-0 left-0 text-gray-500 bg-gray-900/50 px-1 rounded">{min.toFixed(2)}</div>
+        </div>
+      );
+    };
+
+    const SvgBarChart = ({ data, dataKey, colorFn, height = 120 }) => {
+      if (!data || data.length === 0) return null;
+      const max = Math.max(...data.map(d => Math.abs(d[dataKey] || 0))) * 1.1 || 1;
+      const width = 1000;
+      const barW = (width / data.length) * 0.8;
+      const spacing = (width / data.length) * 0.2;
+
+      return (
+        <div className="relative w-full mt-2" style={{ height }}>
+          <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
+            <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="#4b5563" strokeWidth="1" strokeDasharray="4 4" />
+            {data.map((d, i) => {
+              const val = d[dataKey] || 0;
+              const barH = (Math.abs(val) / max) * (height / 2);
+              const x = i * (barW + spacing);
+              const y = val >= 0 ? height / 2 - barH : height / 2;
+              return <rect key={i} x={x} y={y} width={barW} height={barH} fill={colorFn(d)} />;
+            })}
+          </svg>
+        </div>
+      );
+    };
+
+    const TrafficLight = ({ status }) => {
+      const colors = {
+        green:  'background-color:#22c55e;box-shadow:0 0 10px rgba(34,197,94,0.8)',
+        yellow: 'background-color:#eab308;box-shadow:0 0 10px rgba(234,179,8,0.8)',
+        red:    'background-color:#ef4444;box-shadow:0 0 10px rgba(239,68,68,0.8)',
+      };
+      return (
+        <div className="rounded-full w-4 h-4 flex-shrink-0"
+          style={{ ...(status === 'green' ? { backgroundColor:'#22c55e', boxShadow:'0 0 10px rgba(34,197,94,0.8)' }
+                      : status === 'yellow' ? { backgroundColor:'#eab308', boxShadow:'0 0 10px rgba(234,179,8,0.8)' }
+                      : status === 'red'    ? { backgroundColor:'#ef4444', boxShadow:'0 0 10px rgba(239,68,68,0.8)' }
+                      : { backgroundColor:'#6b7280' }) }}
+        />
+      );
+    };
+
+    // ==========================================
+    // 3. API 抓取邏輯
+    // ==========================================
+    const fetchFinMind = async (dataset, dataId, token, startDate) => {
+      let url = `https://api.finmindtrade.com/api/v4/data?dataset=${dataset}&start_date=${startDate}`;
+      if (dataId) url += `&data_id=${dataId}`;
+      if (token) url += `&token=${token}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.msg !== 'success' || !json.data || json.data.length === 0)
+        throw new Error(json.msg || 'API回傳無數據');
+      return json.data;
+    };
+
+    const fetchFinMindFallback = async (options, token, startDate) => {
+      for (const opt of options) {
+        try { return await fetchFinMind(opt.dataset, opt.dataId, token, startDate); }
+        catch (e) { console.warn(`[Fallback] ${opt.dataset} failed`); }
+      }
+      throw new Error('所有備援路由皆查無數據');
+    };
+
+    const fetchYahoo = async (symbol) => {
+      const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=3mo`;
+      const proxies = [
+        { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,
+          parse: async r => JSON.parse((await r.json()).contents) },
+        { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+          parse: async r => r.json() },
+      ];
+      for (const proxy of proxies) {
+        try {
+          const res = await fetch(proxy.url);
+          if (!res.ok) continue;
+          const json = await proxy.parse(res);
+          const result = json?.chart?.result?.[0];
+          if (result?.timestamp && result?.indicators?.quote?.[0]?.close) {
+            const data = result.timestamp.map((t, i) => ({
+              date: new Date(t * 1000).toISOString().split('T')[0],
+              close: result.indicators.quote[0].close[i],
+            })).filter(d => d.close != null);
+            if (data.length > 0) return data;
+          }
+        } catch (e) { console.warn(`[Yahoo] proxy failed for ${symbol}:`, e); }
+      }
+      throw new Error('外部資料連線遭拒');
+    };
+
+    // ==========================================
+    // 4. ModuleCard
+    // ==========================================
+    const ModuleCard = ({ id, data, loading, error, isExpanded, onToggle }) => {
+      const config = MODULE_CONFIG[id];
+      const IconComp = Icons[config.icon];
+      const statusText = { green: '多方 / 健康', yellow: '中立 / 注意', red: '空方 / 警示' };
+
+      return (
+        <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-lg flex flex-col h-full">
+          <div className="flex justify-between items-center cursor-pointer" onClick={onToggle}>
+            <div className="flex items-center gap-3 w-full pr-4">
+              <div className="p-2 bg-gray-700 rounded-lg flex-shrink-0">
+                <IconComp size={20} className="text-gray-300" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-white truncate">{id} {config.title}</h3>
+                {loading ? (
+                  <span className="text-sm text-gray-400 block mt-1">資料載入中...</span>
+                ) : error ? (
+                  <span className="text-sm text-red-400 flex items-center gap-1 mt-1 truncate">
+                    <Icons.AlertCircle size={14} className="flex-shrink-0" /> 取回失敗
+                  </span>
+                ) : data ? (
+                  <div className="flex items-center gap-2 mt-1">
+                    <TrafficLight status={data.status} />
+                    <span className="text-sm text-gray-400 font-medium whitespace-nowrap">{statusText[data.status]}</span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <button className="text-gray-400 hover:text-white transition-colors flex-shrink-0">
+              {isExpanded ? <Icons.ChevronUp size={24} /> : <Icons.ChevronDown size={24} />}
+            </button>
+          </div>
+
+          {!loading && !error && data && (
+            <div className="mt-4 text-gray-300 text-sm leading-relaxed flex-grow">{data.summary}</div>
+          )}
+          {error && !loading && (
+            <div className="mt-4 text-red-400/80 text-xs bg-red-950/30 p-2 rounded break-words">錯誤: {error}</div>
+          )}
+          {isExpanded && data && !loading && !error && (
+            <div className="mt-5 pt-5 border-t border-gray-700 animate-in">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-gray-500">{data.chartTitle || '近期趨勢'}</p>
+                {data.legend && <div className="text-xs flex gap-3">{data.legend}</div>}
+              </div>
+              {data.renderChart ? data.renderChart() : <div className="text-gray-500 text-xs">圖表建置中</div>}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 5. App
+    // ==========================================
+    function App() {
+      const [token, setToken] = useState(localStorage.getItem('finmind_token') || DEFAULT_FINMIND_TOKEN);
+      const [showTokenInput, setShowTokenInput] = useState(false);
+      const [lastUpdated, setLastUpdated] = useState('');
+      const [isRefreshing, setIsRefreshing] = useState(false);
+      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null });
+      const [moduleErrors, setModuleErrors] = useState({});
+      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true });
+      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false });
+
+      const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
+
+      const fetchAllData = async () => {
+        setIsRefreshing(true);
+        setModuleErrors({});
+        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true });
+
+        const startDate  = getPastDateString(8);
+        const recentDate = getPastDateString(3);
+
+        // M1
+        const processM1 = async () => {
+          try {
+            const [tsmc, delta, mtk] = await Promise.all([
+              fetchFinMind('TaiwanStockPrice', '2330', token, startDate),
+              fetchFinMind('TaiwanStockPrice', '2308', token, startDate),
+              fetchFinMind('TaiwanStockPrice', '2454', token, startDate),
+            ]);
+            let tsmcData = calculateSMA(tsmc.map(d => ({ date:d.date, close:d.close })), 60);
+            let deltaData = calculateSMA(delta.map(d => ({ date:d.date, close:d.close })), 60);
+            let mtkData   = calculateSMA(mtk.map(d => ({ date:d.date, close:d.close })), 60);
+
+            const lastT = tsmcData[tsmcData.length-1];
+            const lastD = deltaData[deltaData.length-1];
+            const lastM = mtkData[mtkData.length-1];
+            const tsmcAbove = lastT.close > lastT.sma60;
+            const deltaAbove = lastD.close > lastD.sma60;
+            const mtkAbove   = lastM.close > lastM.sma60;
+            const aboveCount = [tsmcAbove, deltaAbove, mtkAbove].filter(Boolean).length;
+
+            let status = 'green';
+            if (aboveCount === 2) status = 'yellow';
+            if (aboveCount <= 1 || !tsmcAbove) status = 'red';
+
+            setModuleData(prev => ({...prev, M1: {
+              status,
+              summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，聯發科(2454)${mtkAbove?'站上':'跌破'}季線。共 ${aboveCount} 檔核心權值股位於季線之上。`,
+              chartTitle: '權值股近期走勢 (過去 120 日)',
+              legend: (
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#facc15'}}></span>60MA
+                </span>
+              ),
+              renderChart: () => (
+                <div className="flex flex-col gap-4">
+                  {[['2330 台積電', tsmcData, '#60a5fa'], ['2308 台達電', deltaData, '#4ade80'], ['2454 聯發科', mtkData, '#c084fc']].map(([label, d, color]) => (
+                    <div key={label}>
+                      <p className="text-xs font-medium mb-1" style={{color}}>{label}</p>
+                      <SvgLineChart data={d.slice(-120)} lines={[{key:'close',color,width:'2'},{key:'sma60',color:'#facc15',width:'1.5'}]} height={80} />
+                    </div>
+                  ))}
+                </div>
+              ),
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M1:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M1:false})); }
+        };
+
+        // M2
+        const processM2 = async () => {
+          try {
+            const data = await fetchFinMindFallback([
+              { dataset:'TaiwanStockTotalInstitutionalInvestors', dataId:'' },
+              { dataset:'TaiwanStockInstitutionalInvestors', dataId:'TAIEX' },
+            ], token, recentDate);
+
+            const foreignData = data.filter(d => d.name && (d.name.includes('外資') || d.name.includes('Foreign_Investor')));
+            const byDate = {};
+            foreignData.forEach(d => {
+              if (!byDate[d.date]) byDate[d.date] = 0;
+              byDate[d.date] += (Number(d.buy)||0 - (Number(d.sell)||0)) / 1e8;
+            });
+            const sortedDates = Object.keys(byDate).sort();
+            if (!sortedDates.length) throw new Error('找不到外資買賣超資料');
+
+            const chartData = sortedDates.slice(-30).map(date => ({ date, netBuy: byDate[date] }));
+            const n = Math.min(5, chartData.length);
+            const last5Total = chartData.slice(-n).reduce((s, d) => s + d.netBuy, 0);
+
+            let status = 'yellow';
+            if (last5Total > 100) status = 'green';
+            if (last5Total < -100) status = 'red';
+
+            setModuleData(prev => ({...prev, M2: {
+              status,
+              summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
+              chartTitle: '外資近 30 日大盤買賣超 (億元)',
+              renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#22c55e' : '#ef4444'} />,
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M2:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M2:false})); }
+        };
+
+        // M3
+        const processM3 = async () => {
+          try {
+            const data = await fetchFinMindFallback([
+              { dataset:'TaiwanStockTotalMarginPurchaseShortSale', dataId:'' },
+              { dataset:'TaiwanStockMarginPurchaseShortSale', dataId:'TAIEX' },
+              { dataset:'TaiwanStockMarginPurchaseShortsale', dataId:'TAIEX' },
+            ], token, recentDate);
+
+            const marginMap = {};
+            data.forEach(d => {
+              const val = Number(d.MarginPurchaseTodayBalance) || Number(d.TodayBalance);
+              if (val) marginMap[d.date] = val;
+            });
+            const sortedDates = Object.keys(marginMap).sort();
+            if (sortedDates.length < 2) throw new Error('可用融資數據不足');
+
+            const marginData = sortedDates.slice(-30).map(date => ({ date, val: marginMap[date] }));
+            const cur  = marginData[marginData.length-1];
+            const daysBack = Math.min(6, marginData.length) - 1;
+            const prev = marginData[marginData.length-1-daysBack];
+            const rate = prev.val ? ((cur.val - prev.val) / prev.val) * 100 : 0;
+
+            let status = 'green';
+            if (rate >= 5 && rate <= 15) status = 'yellow';
+            if (rate > 15 || rate < -15) status = 'red';
+
+            setModuleData(prev => ({...prev, M3: {
+              status,
+              summary: `大盤融資餘額近 ${daysBack} 個交易日變化率為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
+              chartTitle: '大盤融資餘額走勢 (近30日)',
+              renderChart: () => <SvgLineChart data={marginData} lines={[{key:'val',color:'#c084fc',width:'2'}]} />,
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M3:false})); }
+        };
+
+        // M4 + M5
+        const processM4M5 = async () => {
+          try {
+            const raw = await fetchFinMind('TaiwanStockPrice', 'TAIEX', token, startDate);
+            const fmt = raw.map(d => ({ date:d.date, close:d.close, volume:d.Trading_Volume/1e8, open:d.open }));
+            let td = calculateSMA(fmt, 60);
+            td = calculateSMA(td, 120);
+            td = calculateSMA(td, 10, 'volume');
+            td = calculateMACD(td);
+
+            const last = td[td.length-1];
+            const prev = td[td.length-2];
+            const volRatio = last.volume / last.sma10;
+            const priceUp  = last.close > prev.close;
+
+            let m4Status = 'yellow';
+            if (volRatio > 1.2 && priceUp)  m4Status = 'green';
+            if (volRatio > 1.2 && !priceUp) m4Status = 'red';
+
+            setModuleData(p => ({...p, M4: {
+              status: m4Status,
+              summary: `大盤今日成交量約 ${Math.round(last.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
+              chartTitle: '加權指數成交量 (億)',
+              renderChart: () => <SvgBarChart data={td.slice(-30)} dataKey="volume" colorFn={d => d.close > d.open ? '#22c55e' : '#ef4444'} />,
+            }}));
+
+            const over60  = last.close > last.sma60;
+            const over120 = last.close > last.sma120;
+            let m5Status = 'green';
+            if (over60 && !over120) m5Status = 'yellow';
+            if (!over60 && last.macd < 0) m5Status = 'red';
+
+            setModuleData(p => ({...p, M5: {
+              status: m5Status,
+              summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線。MACD 值為 ${last.macd.toFixed(1)}。`,
+              chartTitle: '加權指數走勢與季線(黃)/半年線(紫)',
+              renderChart: () => (
+                <SvgLineChart
+                  data={td.slice(-120)}
+                  lines={[{key:'close',color:'#ffffff',width:'2'},{key:'sma60',color:'#facc15',width:'1.5'},{key:'sma120',color:'#c084fc',width:'1.5'}]}
+                />
+              ),
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M4:e.message, M5:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M4:false, M5:false})); }
+        };
+
+        // M6
+        const processM6 = async () => {
+          try {
+            let soxData, displayName;
+            for (const item of [{code:'^SOX',name:'費城半導體指數 (^SOX)'},{code:'SOXX',name:'費半 ETF (SOXX)'},{code:'TSM',name:'台積電 ADR (TSM)'}]) {
+              try { soxData = await fetchYahoo(item.code); displayName = item.name; break; }
+              catch(e) { console.warn(`[M6] ${item.code} failed`); }
+            }
+            if (!soxData || soxData.length < 5) throw new Error('外部資料連線異常');
+
+            const last  = soxData[soxData.length-1].close;
+            const prev5 = soxData[soxData.length-6].close;
+            const rate  = ((last - prev5) / prev5) * 100;
+
+            let status = 'yellow';
+            if (rate > 2)  status = 'green';
+            if (rate < -3) status = 'red';
+
+            setModuleData(prev => ({...prev, M6: {
+              status,
+              summary: `${displayName} 近 5 日漲跌幅為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
+              chartTitle: `${displayName} 走勢 (近3個月)`,
+              renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M6:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M6:false})); }
+        };
+
+        await Promise.allSettled([processM1(), processM2(), processM3(), processM4M5(), processM6()]);
+
+        const now = new Date();
+        setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
+        setIsRefreshing(false);
+      };
+
+      useEffect(() => { fetchAllData(); }, []);
+
+      const calculateScore = () => {
+        let totalScore = 0, validWeights = 0;
+        Object.keys(MODULE_CONFIG).forEach(key => {
+          if (moduleData[key] && !moduleLoading[key] && !moduleErrors[key]) {
+            const points = moduleData[key].status === 'green' ? 100 : moduleData[key].status === 'yellow' ? 50 : 0;
+            totalScore   += points * MODULE_CONFIG[key].weight;
+            validWeights += MODULE_CONFIG[key].weight;
+          }
+        });
+        return validWeights > 0 ? Math.round(totalScore / validWeights) : null;
+      };
+
+      const isAllExpanded = Object.values(expandedCards).every(Boolean);
+      const handleToggleAll = () => {
+        const v = !isAllExpanded;
+        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v });
+      };
+
+      const score = calculateScore();
+      const currentLabel = score !== null ? (SCORE_LABELS.find(l => score >= l.min) || SCORE_LABELS[4]) : null;
+
+      return (
+        <div className="min-h-screen bg-gray-900 text-white font-sans">
+          <div className="max-w-6xl mx-auto px-4 py-8">
+
+            {/* Header */}
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4 pb-6 border-b border-gray-800">
+              <div>
+                <h1 className="text-3xl font-bold flex items-center gap-3">
+                  <Icons.Activity className="text-green-500" size={32} />
+                  台股多空雷達
+                </h1>
+                <p className="text-gray-400 mt-2 text-sm flex items-center gap-2">
+                  <span>基於 FinMind 與 Yahoo 歷史資料計算</span>
+                  <button
+                    onClick={() => setShowTokenInput(!showTokenInput)}
+                    className="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 bg-blue-900/30 rounded border border-blue-800 flex items-center gap-1 transition-colors"
+                  >
+                    {token === DEFAULT_FINMIND_TOKEN
+                      ? <><Icons.CheckCircle2 size={12} className="text-green-400" /> 已啟用專屬 Token</>
+                      : <><Icons.Key size={12} /> 自訂 Token</>}
+                  </button>
+                </p>
+                {showTokenInput && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 animate-in bg-gray-800 p-3 rounded border border-gray-700">
+                    <input
+                      type="password"
+                      value={token}
+                      onChange={e => saveToken(e.target.value)}
+                      placeholder="輸入 FinMind Token"
+                      className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-green-500 w-full sm:w-64 md:w-96"
+                    />
+                    <button onClick={fetchAllData} className="bg-green-600 hover:bg-green-500 px-4 py-1.5 rounded text-sm transition-colors text-white">
+                      套用並重整
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-4 bg-gray-800 px-4 py-2 rounded-lg border border-gray-700 w-full md:w-auto justify-between md:justify-start">
+                <div className="text-sm">
+                  <span className="text-gray-400 block">資料結算至</span>
+                  <span className="font-mono text-gray-200">{lastUpdated || '載入中...'}</span>
+                </div>
+                <button
+                  onClick={fetchAllData}
+                  disabled={isRefreshing}
+                  className="p-2 bg-gray-700 hover:bg-gray-600 rounded-md transition-colors disabled:opacity-50"
+                  title="重新抓取最新資料"
+                >
+                  <Icons.RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </header>
+
+            {/* 綜合評分 */}
+            <section className="mb-6 bg-gray-800 p-8 rounded-2xl border border-gray-700 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8">
+              <div className="text-center md:text-left w-full md:w-auto">
+                <h2 className="text-gray-400 text-lg mb-2">大盤綜合多空評分</h2>
+                <div className="flex items-baseline gap-4 justify-center md:justify-start">
+                  <span className={`text-7xl font-black ${score !== null ? currentLabel.color : 'text-gray-600'}`}>
+                    {score !== null ? score : '--'}
+                  </span>
+                  <span className="text-2xl text-gray-500 font-medium">/ 100</span>
+                </div>
+              </div>
+              <div className="flex flex-col items-center md:items-end gap-3 w-full md:w-auto">
+                <div className="flex items-center gap-3 bg-gray-900/50 px-6 py-3 rounded-full border border-gray-700">
+                  {score !== null ? (
+                    <>
+                      <TrafficLight status={score >= 60 ? 'green' : score >= 40 ? 'yellow' : 'red'} />
+                      <span className={`text-2xl font-bold ${currentLabel.color}`}>{currentLabel.label}</span>
+                    </>
+                  ) : (
+                    <span className="text-gray-500">等待資料載入...</span>
+                  )}
+                </div>
+                <div className="w-full max-w-xs md:w-64 h-2 bg-gray-700 rounded-full overflow-hidden flex relative">
+                  <div className="h-full w-1/5" style={{backgroundColor:'#ef4444'}}></div>
+                  <div className="h-full w-1/5" style={{backgroundColor:'#f87171'}}></div>
+                  <div className="h-full w-1/5" style={{backgroundColor:'#eab308'}}></div>
+                  <div className="h-full w-1/5" style={{backgroundColor:'#4ade80'}}></div>
+                  <div className="h-full w-1/5" style={{backgroundColor:'#22c55e'}}></div>
+                  {score !== null && (
+                    <div
+                      className="absolute top-0 bottom-0 w-1 bg-white transition-all duration-700"
+                      style={{ left:`${score}%`, boxShadow:'0 0 5px white' }}
+                    />
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* 全部展開/收折 */}
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={handleToggleAll}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-300 transition-colors"
+              >
+                {isAllExpanded
+                  ? <><Icons.ChevronUp size={16} /> 全部收折</>
+                  : <><Icons.ChevronDown size={16} /> 全部展開</>}
+              </button>
+            </div>
+
+            {/* 模組 Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Object.keys(MODULE_CONFIG).map(key => (
+                <ModuleCard
+                  key={key}
+                  id={key}
+                  data={moduleData[key]}
+                  loading={moduleLoading[key]}
+                  error={moduleErrors[key]}
+                  isExpanded={expandedCards[key]}
+                  onToggle={() => setExpandedCards(prev => ({...prev, [key]: !prev[key]}))}
+                />
+              ))}
+            </div>
+
+            {/* 錯誤提示 */}
+            {Object.values(moduleErrors).some(Boolean) && (
+              <div className="mt-8 p-4 bg-red-900/20 border border-red-800 rounded-lg text-sm text-red-300">
+                <p className="font-bold mb-1">
+                  <Icons.AlertCircle size={16} className="inline mr-1" /> 部分資料取回失敗
+                </p>
+                <p>若依然顯示錯誤，可能是 FinMind 歷史資料區間維護或 Yahoo API 擋阻。系統已啟動防呆機制，暫不將失敗項目計入總分評估。</p>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
