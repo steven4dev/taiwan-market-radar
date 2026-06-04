@@ -21,31 +21,29 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Playwright
+      - name: Install Playwright + Stealth
         run: |
-          npm install playwright
+          npm install playwright playwright-extra puppeteer-extra-plugin-stealth
           npx playwright install chromium --with-deps
 
       - name: Fetch 八大公股銀行資料（Playwright）
         run: |
           node << 'EOF'
-          const { chromium } = require('playwright');
+          const { chromium } = require('playwright-extra');
+          const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+          chromium.use(StealthPlugin());
           const fs = require('fs');
 
           (async () => {
             const browser = await chromium.launch({
               headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox']
+              args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
             });
 
             const context = await browser.newContext({
               userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
               locale: 'zh-TW',
-            });
-
-            // 隱藏 webdriver 旗標，避免 Cloudflare 偵測
-            await context.addInitScript(() => {
-              Object.defineProperty(navigator, 'webdriver', { get: () => false });
+              viewport: { width: 1280, height: 800 },
             });
 
             const page = await context.newPage();
