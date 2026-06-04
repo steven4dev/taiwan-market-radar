@@ -16,22 +16,37 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Fetch 八大公股銀行資料
+      - name: Fetch 八大公股銀行資料（帶 cookie）
         run: |
           mkdir -p data
-          curl -s \
-            -H "Referer: https://www.wantgoo.com/" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+
+          # Step 1：先訪問主頁，取得 session cookie
+          curl -s -c /tmp/wantgoo_cookie.txt \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+            -H "Accept-Language: zh-TW,zh;q=0.9,en;q=0.8" \
+            "https://www.wantgoo.com/stock/public-bank/trend" \
+            -o /dev/null
+
+          # Step 2：帶 cookie 抓 API
+          curl -s -b /tmp/wantgoo_cookie.txt \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
             -H "Accept: application/json, text/plain, */*" \
+            -H "Accept-Language: zh-TW,zh;q=0.9,en;q=0.8" \
+            -H "Referer: https://www.wantgoo.com/stock/public-bank/trend" \
+            -H "X-Requested-With: XMLHttpRequest" \
             "https://www.wantgoo.com/stock/public-bank/trend-data?market=-1" \
             -o data/public-bank.json
 
-          # 驗證是否為合法 JSON 陣列
+          echo "--- Response preview ---"
+          head -c 200 data/public-bank.json
+
+          # Step 3：驗證 JSON
           python3 -c "
-          import json, sys
+          import json
           with open('data/public-bank.json') as f:
               d = json.load(f)
-          assert isinstance(d, list) and len(d) > 0, 'Invalid data'
+          assert isinstance(d, list) and len(d) > 0, f'Invalid: {str(d)[:100]}'
           print(f'OK: {len(d)} records, latest: {d[0][\"date\"][:10]}')
           "
 
