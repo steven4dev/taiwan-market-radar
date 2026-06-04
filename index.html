@@ -241,7 +241,93 @@
     };
 
     // ==========================================
-    // 4. ModuleCard
+    // 4. 下車警示區塊
+    // ==========================================
+    const ExitSignalBlock = ({ score, moduleData, revData }) => {
+      const m0 = moduleData.M0;
+      const m5 = moduleData.M5;
+
+      // Signal 1：大盤情緒過熱（由多空評分推算）
+      const greedScore = score ?? 0;
+      const s1Triggered = greedScore >= 75;
+      const s1Status = greedScore >= 75 ? 'red' : greedScore >= 60 ? 'yellow' : 'green';
+      const s1Desc = score !== null ? `多空評分 ${score}（${greedScore >= 75 ? '過熱，建議慢慢減碼' : greedScore >= 60 ? '偏熱，留意風險' : '正常範圍'}）` : '等待資料...';
+
+      // Signal 2：月營收警訊（台積電 YoY）
+      const s2Triggered = revData && (revData.yoy < 0 || revData.declining);
+      const s2Status = !revData ? 'yellow'
+        : revData.yoy < 0 ? 'red'
+        : revData.declining ? 'yellow'
+        : revData.yoy < 5 ? 'yellow' : 'green';
+      const s2Desc = !revData ? '月營收資料載入中...'
+        : `台積電月營收 YoY ${revData.yoy > 0 ? '+' : ''}${revData.yoy?.toFixed(1)}%${revData.declining ? '，連續萎縮中' : ''}`;
+
+      // Signal 3：短線漲幅過高（TAIEX 近 20 日）
+      const rally = m5?.rally20d;
+      const s3Triggered = rally !== null && rally > 15;
+      const s3Status = rally === null ? 'yellow'
+        : rally > 20 ? 'red' : rally > 12 ? 'yellow' : 'green';
+      const s3Desc = rally !== null
+        ? `大盤近20日漲幅 ${rally > 0 ? '+' : ''}${rally.toFixed(1)}%（${rally > 20 ? '漲幅過大' : rally > 12 ? '漲幅偏高' : '正常'}）`
+        : '技術面資料載入中...';
+
+      // Signal 4：跌破股神指標（M0 分水嶺）
+      const s4Triggered = m0?.status === 'red';
+      const s4Status = !m0 ? 'yellow' : m0.status === 'red' ? 'red' : 'green';
+      const s4Desc = !m0 ? '分水嶺資料載入中...'
+        : m0.status === 'red'
+          ? `已跌破分水嶺，嚴守紀律停損出場`
+          : `持守分水嶺以上，持倉安全`;
+
+      const signals = [
+        { num: '①', label: '大盤情緒過熱', desc: s1Desc, status: s1Status, triggered: s1Triggered, tip: '貪婪指數 > 50 慢慢減碼' },
+        { num: '②', label: '月營收警訊',   desc: s2Desc, status: s2Status, triggered: s2Triggered, tip: '同業差/衰退/沒創新高 → 減碼' },
+        { num: '③', label: '短線漲幅過高', desc: s3Desc, status: s3Status, triggered: s3Triggered, tip: '近20日漲幅 > 15% → 先減碼' },
+        { num: '④', label: '跌破股神指標', desc: s4Desc, status: s4Status, triggered: s4Triggered, tip: '跌破分水嶺，嚴守紀律停損' },
+      ];
+
+      const triggeredCount = signals.filter(s => s.triggered).length;
+      const riskColor = triggeredCount >= 3 ? 'text-red-400' : triggeredCount >= 2 ? 'text-orange-400' : triggeredCount === 1 ? 'text-yellow-400' : 'text-green-400';
+      const riskLabel = triggeredCount >= 3 ? '高風險，建議減碼' : triggeredCount === 2 ? '中風險，注意觀察' : triggeredCount === 1 ? '低風險，留意訊號' : '目前無下車訊號';
+      const borderColor = triggeredCount >= 3 ? 'border-red-800' : triggeredCount >= 2 ? 'border-orange-800' : triggeredCount === 1 ? 'border-yellow-800' : 'border-gray-700';
+
+      const dotColors = { red: '#ef4444', yellow: '#eab308', green: '#22c55e' };
+
+      return (
+        <section className={`mb-6 bg-gray-800 rounded-2xl p-6 border ${borderColor} shadow-xl`}>
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <span className="text-xl">⚠️</span> 下車警示
+            </h2>
+            <div className="flex items-center gap-2 bg-gray-900/60 px-4 py-1.5 rounded-full border border-gray-700">
+              <span className={`text-2xl font-black ${riskColor}`}>{triggeredCount}</span>
+              <span className="text-gray-400 text-sm">/ 4 訊號觸發</span>
+              <span className={`text-sm font-medium ${riskColor} ml-1`}>— {riskLabel}</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {signals.map((s, i) => (
+              <div key={i} className={`rounded-xl p-4 border transition-all ${s.triggered ? 'bg-red-950/30 border-red-800/60' : 'bg-gray-900/40 border-gray-700'}`}>
+                <div className="flex items-start gap-3">
+                  <div className="w-3 h-3 rounded-full mt-1 flex-shrink-0" style={{backgroundColor: dotColors[s.status], boxShadow: s.triggered ? `0 0 8px ${dotColors[s.status]}` : 'none'}} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white">
+                      {s.num} {s.label}
+                      {s.triggered && <span className="ml-2 text-xs bg-red-900 text-red-300 px-1.5 py-0.5 rounded">⚡ 觸發</span>}
+                    </p>
+                    <p className="text-xs text-gray-300 mt-1">{s.desc}</p>
+                    <p className="text-xs text-gray-500 mt-1 italic">{s.tip}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      );
+    };
+
+    // ==========================================
+    // 5. ModuleCard
     // ==========================================
     const ModuleCard = ({ id, data, loading, error, isExpanded, onToggle }) => {
       const config = MODULE_CONFIG[id];
@@ -303,6 +389,7 @@
       const [showTokenInput, setShowTokenInput] = useState(false);
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
+      const [revData, setRevData] = useState(null);
       const [moduleData, setModuleData] = useState({ M0:null, M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null });
       const [moduleErrors, setModuleErrors] = useState({});
       const [moduleLoading, setModuleLoading] = useState({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true });
@@ -585,8 +672,13 @@
             if (over60 && !over120) m5Status = 'yellow';
             if (!over60 && last.macd < 0) m5Status = 'red';
 
+            // 近 20 交易日漲幅（供下車警示 Signal 3 使用）
+            const prev20 = td.length >= 21 ? td[td.length - 21].close : null;
+            const rally20d = prev20 ? ((last.close - prev20) / prev20) * 100 : null;
+
             setModuleData(p => ({...p, M5: {
               status: m5Status,
+              rally20d,
               summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線。MACD 值為 ${last.macd.toFixed(1)}。`,
               chartTitle: '加權指數走勢與季線(黃)/半年線(紫)',
               renderChart: () => (
@@ -694,7 +786,26 @@
           finally    { setModuleLoading(prev => ({...prev, M7:false})); }
         };
 
-        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7()]);
+        // 台積電月營收（下車警示 Signal 2）
+        const processRevenue = async () => {
+          try {
+            const data = await fetchFinMind('TaiwanStockMonthRevenue', '2330', token, getPastDateString(18));
+            const sorted = data.sort((a, b) => a.date.localeCompare(b.date));
+            if (sorted.length < 13) return;
+            const latest   = sorted[sorted.length - 1];
+            const yearAgo  = sorted[sorted.length - 13];
+            const prev     = sorted[sorted.length - 2];
+            const yoy = yearAgo ? ((latest.revenue - yearAgo.revenue) / yearAgo.revenue) * 100 : null;
+            const mom = prev    ? ((latest.revenue - prev.revenue)    / prev.revenue)    * 100 : null;
+            // 近 3 個月是否在衰退 (連續兩次 MoM 負成長)
+            const m2  = sorted[sorted.length - 3];
+            const mom2 = m2 && prev ? ((prev.revenue - m2.revenue) / m2.revenue) * 100 : null;
+            const declining = mom !== null && mom < 0 && mom2 !== null && mom2 < 0;
+            setRevData({ yoy, mom, declining, date: latest.date, revenue: latest.revenue });
+          } catch(e) { console.warn('[Revenue]', e.message); }
+        };
+
+        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processRevenue()]);
 
         const now = new Date();
         setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
@@ -814,6 +925,9 @@
                 </div>
               </div>
             </section>
+
+            {/* 下車警示 */}
+            <ExitSignalBlock score={score} moduleData={moduleData} revData={revData} />
 
             {/* 全部展開/收折 */}
             <div className="flex justify-end mb-4">
