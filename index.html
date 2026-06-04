@@ -51,6 +51,7 @@
       AlertCircle: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"M12 8v4","M12 16h.01"]} />,
       CheckCircle2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"m9 12 2 2 4-4"]} />,
       Milestone: ({ size, className }) => <Icon size={size} className={className} d={["M12 13V2l8 4-8 4",{tag:'path',d:"M20.55 10.23A9 9 0 1 1 8 4.94"},"M8 10a5 5 0 1 0 8.9 2.02"]} />,
+      Building2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'rect',width:'16',height:'20',x:'4',y:'2',rx:'2',ry:'2'},"M9 22v-4h6v4","M8 6h.01","M16 6h.01","M12 6h.01","M12 10h.01","M8 10h.01","M16 10h.01","M12 14h.01","M8 14h.01","M16 14h.01"]} />,
     };
 
     // ==========================================
@@ -59,13 +60,14 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     const MODULE_CONFIG = {
-      M0: { weight: 0.20, title: '多空分水嶺',   icon: 'Milestone' },
-      M1: { weight: 0.20, title: '權值股健康度', icon: 'Activity' },
-      M2: { weight: 0.20, title: '法人動向',     icon: 'Users' },
-      M3: { weight: 0.12, title: '籌碼面',       icon: 'PieChart' },
-      M4: { weight: 0.08, title: '量能結構',     icon: 'BarChart2' },
-      M5: { weight: 0.12, title: '技術面',       icon: 'TrendingUp' },
-      M6: { weight: 0.08, title: '外部環境',     icon: 'Globe' },
+      M0: { weight: 0.18, title: '多空分水嶺',   icon: 'Milestone' },
+      M1: { weight: 0.18, title: '權值股健康度', icon: 'Activity' },
+      M2: { weight: 0.18, title: '法人動向',     icon: 'Users' },
+      M3: { weight: 0.11, title: '籌碼面',       icon: 'PieChart' },
+      M4: { weight: 0.07, title: '量能結構',     icon: 'BarChart2' },
+      M5: { weight: 0.11, title: '技術面',       icon: 'TrendingUp' },
+      M6: { weight: 0.07, title: '外部環境',     icon: 'Globe' },
+      M7: { weight: 0.10, title: '公股銀行動向', icon: 'Building2' },
     };
 
     const SCORE_LABELS = [
@@ -301,17 +303,17 @@
       const [showTokenInput, setShowTokenInput] = useState(false);
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
-      const [moduleData, setModuleData] = useState({ M0:null, M1:null, M2:null, M3:null, M4:null, M5:null, M6:null });
+      const [moduleData, setModuleData] = useState({ M0:null, M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null });
       const [moduleErrors, setModuleErrors] = useState({});
-      const [moduleLoading, setModuleLoading] = useState({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true });
-      const [expandedCards, setExpandedCards] = useState({ M0:false, M1:false, M2:false, M3:false, M4:false, M5:false, M6:false });
+      const [moduleLoading, setModuleLoading] = useState({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true });
+      const [expandedCards, setExpandedCards] = useState({ M0:false, M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false });
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
       const fetchAllData = async () => {
         setIsRefreshing(true);
         setModuleErrors({});
-        setModuleLoading({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true });
+        setModuleLoading({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true });
 
         const startDate  = getPastDateString(8);
         const recentDate = getPastDateString(3);
@@ -626,7 +628,85 @@
           finally    { setModuleLoading(prev => ({...prev, M6:false})); }
         };
 
-        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6()]);
+        // M7 公股銀行動向
+        const processM7 = async () => {
+          try {
+            const BANKS = {
+              tcb: '合庫', bot: '台銀', land: '土銀', hncb: '華南',
+              mega: '兆豐', tbb: '台企銀', chb: '彰銀', first: '第一金',
+            };
+            const targetUrl = 'https://www.wantgoo.com/stock/public-bank/trend-data?market=-1';
+            const proxies = [
+              { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,
+                parse: async r => JSON.parse((await r.json()).contents) },
+              { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+                parse: async r => r.json() },
+            ];
+
+            let raw = null;
+            for (const proxy of proxies) {
+              try {
+                const res = await fetch(proxy.url);
+                if (!res.ok) continue;
+                raw = await proxy.parse(res);
+                if (Array.isArray(raw) && raw.length > 0) break;
+              } catch(e) { console.warn('[M7 proxy]', e); }
+            }
+            if (!raw || raw.length === 0) throw new Error('公股銀行資料取得失敗');
+
+            // 由新到舊排序，計算每日合計
+            const series = raw
+              .map(d => {
+                const total = Object.keys(BANKS).reduce((s, k) => s + (d[k]?.amount || 0), 0);
+                return { date: d.date.slice(0, 10), total: Math.round(total) };
+              })
+              .sort((a, b) => a.date.localeCompare(b.date));
+
+            // 近5日合計
+            const recent5 = series.slice(-5);
+            const sum5 = recent5.reduce((s, d) => s + d.total, 0);
+
+            // 近20日中位數（判斷是否異常護盤）
+            const recent20 = series.slice(-20).map(d => d.total);
+            const sorted20 = [...recent20].sort((a, b) => a - b);
+            const median20 = sorted20[Math.floor(sorted20.length / 2)];
+
+            // 連續買超天數
+            let consecutiveBuy = 0;
+            for (let i = series.length - 1; i >= 0; i--) {
+              if (series[i].total > 0) consecutiveBuy++;
+              else break;
+            }
+
+            // 判斷邏輯
+            // 🟢 護盤：近5日合計>0 且最新一日買超
+            // 🔴 撤退：近5日合計<0
+            // 🟡 其他
+            const latest = series[series.length - 1];
+            let status = 'yellow';
+            if (sum5 > 0 && latest.total > 0) status = 'green';
+            if (sum5 < 0) status = 'red';
+
+            const fmt = v => `${v > 0 ? '+' : ''}${(v / 10000).toFixed(1)}億`;
+
+            setModuleData(prev => ({...prev, M7: {
+              status,
+              summary: `八大公股銀行近5日合計 ${fmt(sum5)}（萬元）。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
+              chartTitle: '八大公股銀行每日買賣超合計 (萬元，近60日)',
+              renderChart: () => (
+                <SvgBarChart
+                  data={series.slice(-60)}
+                  dataKey="total"
+                  colorFn={d => d.total > 0 ? '#22c55e' : '#ef4444'}
+                  height={100}
+                />
+              ),
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M7:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M7:false})); }
+        };
+
+        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7()]);
 
         const now = new Date();
         setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
@@ -650,7 +730,7 @@
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
       const handleToggleAll = () => {
         const v = !isAllExpanded;
-        setExpandedCards({ M0:v, M1:v, M2:v, M3:v, M4:v, M5:v, M6:v });
+        setExpandedCards({ M0:v, M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v });
       };
 
       const score = calculateScore();
