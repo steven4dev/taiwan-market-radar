@@ -635,24 +635,12 @@
               tcb: '合庫', bot: '台銀', land: '土銀', hncb: '華南',
               mega: '兆豐', tbb: '台企銀', chb: '彰銀', first: '第一金',
             };
-            const targetUrl = 'https://www.wantgoo.com/stock/public-bank/trend-data?market=-1';
-            const proxies = [
-              { url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,
-                parse: async r => JSON.parse((await r.json()).contents) },
-              { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
-                parse: async r => r.json() },
-            ];
 
-            let raw = null;
-            for (const proxy of proxies) {
-              try {
-                const res = await fetch(proxy.url);
-                if (!res.ok) continue;
-                raw = await proxy.parse(res);
-                if (Array.isArray(raw) && raw.length > 0) break;
-              } catch(e) { console.warn('[M7 proxy]', e); }
-            }
-            if (!raw || raw.length === 0) throw new Error('公股銀行資料取得失敗');
+            // 讀取 GitHub Action 每日更新的本地 JSON（同網域，無 CORS 問題）
+            const res = await fetch('./data/public-bank.json');
+            if (!res.ok) throw new Error('public-bank.json 尚未產生，請手動觸發 GitHub Action');
+            const raw = await res.json();
+            if (!Array.isArray(raw) || raw.length === 0) throw new Error('公股銀行資料格式異常');
 
             // 由新到舊排序，計算每日合計
             const series = raw

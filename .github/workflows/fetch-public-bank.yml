@@ -1,0 +1,44 @@
+name: 每日更新八大公股銀行資料
+
+on:
+  schedule:
+    # 台灣時間 18:30（UTC 10:30），週一至週五盤後執行
+    - cron: '30 10 * * 1-5'
+  workflow_dispatch:  # 允許手動觸發
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch 八大公股銀行資料
+        run: |
+          mkdir -p data
+          curl -s \
+            -H "Referer: https://www.wantgoo.com/" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -H "Accept: application/json, text/plain, */*" \
+            "https://www.wantgoo.com/stock/public-bank/trend-data?market=-1" \
+            -o data/public-bank.json
+
+          # 驗證是否為合法 JSON 陣列
+          python3 -c "
+          import json, sys
+          with open('data/public-bank.json') as f:
+              d = json.load(f)
+          assert isinstance(d, list) and len(d) > 0, 'Invalid data'
+          print(f'OK: {len(d)} records, latest: {d[0][\"date\"][:10]}')
+          "
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/public-bank.json
+          git diff --staged --quiet || git commit -m "data: 更新八大公股銀行資料 $(TZ=Asia/Taipei date +'%Y-%m-%d %H:%M')"
+          git push
