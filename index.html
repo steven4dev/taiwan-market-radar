@@ -467,7 +467,7 @@
           finally    { setModuleLoading(prev => ({...prev, M2:false})); }
         };
 
-        // M3
+        // M3 籌碼乾淨度
         const processM3 = async () => {
           try {
             const data = await fetchFinMindFallback([
@@ -476,29 +476,77 @@
               { dataset:'TaiwanStockMarginPurchaseShortsale', dataId:'TAIEX' },
             ], token, recentDate);
 
-            const marginMap = {};
+            // 同時抓融資與融券
+            const byDate = {};
             data.forEach(d => {
-              const val = Number(d.MarginPurchaseTodayBalance) || Number(d.TodayBalance);
-              if (val) marginMap[d.date] = val;
+              const date = d.date;
+              if (!byDate[date]) byDate[date] = { margin: 0, short: 0 };
+              const margin = Number(d.MarginPurchaseTodayBalance) || Number(d.TodayBalance) || 0;
+              const short  = Number(d.ShortSaleTodayBalance) || 0;
+              if (margin) byDate[date].margin = margin;
+              if (short)  byDate[date].short  = short;
             });
-            const sortedDates = Object.keys(marginMap).sort();
-            if (sortedDates.length < 2) throw new Error('可用融資數據不足');
 
-            const marginData = sortedDates.slice(-30).map(date => ({ date, val: marginMap[date] }));
-            const cur  = marginData[marginData.length-1];
-            const daysBack = Math.min(6, marginData.length) - 1;
-            const prev = marginData[marginData.length-1-daysBack];
-            const rate = prev.val ? ((cur.val - prev.val) / prev.val) * 100 : 0;
+            const sortedDates = Object.keys(byDate).sort().filter(d => byDate[d].margin > 0);
+            if (sortedDates.length < 5) throw new Error('可用籌碼數據不足');
 
-            let status = 'green';
-            if (rate >= 5 && rate <= 15) status = 'yellow';
-            if (rate > 15 || rate < -15) status = 'red';
+            const series = sortedDates.slice(-30).map(date => ({
+              date,
+              margin: byDate[date].margin,
+              short:  byDate[date].short,
+              ratio:  byDate[date].margin > 0 ? (byDate[date].short / byDate[date].margin) * 100 : 0,
+            }));
+
+            const cur  = series[series.length - 1];
+            const prev5 = series[series.length - Math.min(6, series.length)];
+
+            // ── 指標 1：融資水位（近30日百分位）────────────────
+            const marginVals = series.map(d => d.margin);
+            const marginMin  = Math.min(...marginVals);
+            const marginMax  = Math.max(...marginVals);
+            const marginPct  = marginMax > marginMin
+              ? ((cur.margin - marginMin) / (marginMax - marginMin)) * 100 : 50;
+
+            // ── 指標 2：融資趨勢（近6日變化率）──────────────────
+            const marginTrend = prev5.margin ? ((cur.margin - prev5.margin) / prev5.margin) * 100 : 0;
+
+            // ── 指標 3：融券/融資比（近30日百分位）──────────────
+            const ratioVals = series.filter(d => d.ratio > 0).map(d => d.ratio);
+            const ratioMin  = ratioVals.length ? Math.min(...ratioVals) : 0;
+            const ratioMax  = ratioVals.length ? Math.max(...ratioVals) : 1;
+            const ratioPct  = (ratioMax > ratioMin && cur.ratio > 0)
+              ? ((cur.ratio - ratioMin) / (ratioMax - ratioMin)) * 100 : 50;
+
+            // ── 綜合判斷：乾淨度評分（0~100，越高越乾淨）────────
+            // 融資低位 → 加分；融資縮減 → 加分；融券/融資比高 → 加分
+            const cleanScore =
+              (100 - marginPct) * 0.45 +   // 融資低位佔 45%
+              (marginTrend < 0 ? 100 : marginTrend < 3 ? 60 : 20) * 0.30 + // 趨勢佔 30%
+              ratioPct * 0.25;              // 融券比佔 25%
+
+            let status = 'yellow';
+            let cleanLabel = '中性';
+            if (cleanScore >= 65) { status = 'green'; cleanLabel = '乾淨'; }
+            if (cleanScore < 40)  { status = 'red';   cleanLabel = '混濁'; }
+
+            const fmt = v => v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1);
 
             setModuleData(prev => ({...prev, M3: {
               status,
-              summary: `大盤融資餘額近 ${daysBack} 個交易日變化率為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
-              chartTitle: '大盤融資餘額走勢 (近30日)',
-              renderChart: () => <SvgLineChart data={marginData} lines={[{key:'val',color:'#c084fc',width:'2'}]} />,
+              summary: `籌碼${cleanLabel}（乾淨度 ${Math.round(cleanScore)}/100）。融資水位處近期 ${Math.round(marginPct)}% 分位，近6日${marginTrend < 0 ? '縮減' : '增加'} ${fmt(marginTrend)}%；融券/融資比 ${cur.ratio.toFixed(2)}%，處近期 ${Math.round(ratioPct)}% 分位。`,
+              chartTitle: '融資餘額（紫）與融券/融資比（橙）近30日',
+              legend: (
+                <div className="flex gap-3">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#c084fc'}}></span>融資</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#fb923c'}}></span>融券/融資比</span>
+                </div>
+              ),
+              renderChart: () => (
+                <div className="flex flex-col gap-3">
+                  <SvgLineChart data={series} lines={[{key:'margin', color:'#c084fc', width:'2'}]} height={70} />
+                  <SvgLineChart data={series} lines={[{key:'ratio',  color:'#fb923c', width:'2'}]} height={50} />
+                </div>
+              ),
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M3:false})); }
