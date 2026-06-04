@@ -16,39 +16,49 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Fetch 八大公股銀行資料（帶 cookie）
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install cloudscraper
+        run: pip install cloudscraper
+
+      - name: Fetch 八大公股銀行資料
         run: |
-          mkdir -p data
+          python3 << 'EOF'
+          import cloudscraper, json, sys
 
-          # Step 1：先訪問主頁，取得 session cookie
-          curl -s -c /tmp/wantgoo_cookie.txt \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
-            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
-            -H "Accept-Language: zh-TW,zh;q=0.9,en;q=0.8" \
-            "https://www.wantgoo.com/stock/public-bank/trend" \
-            -o /dev/null
+          scraper = cloudscraper.create_scraper(
+              browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+          )
+          headers = {
+              'Referer': 'https://www.wantgoo.com/stock/public-bank/trend',
+              'Accept': 'application/json, text/plain, */*',
+              'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+          }
 
-          # Step 2：帶 cookie 抓 API
-          curl -s -b /tmp/wantgoo_cookie.txt \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
-            -H "Accept: application/json, text/plain, */*" \
-            -H "Accept-Language: zh-TW,zh;q=0.9,en;q=0.8" \
-            -H "Referer: https://www.wantgoo.com/stock/public-bank/trend" \
-            -H "X-Requested-With: XMLHttpRequest" \
-            "https://www.wantgoo.com/stock/public-bank/trend-data?market=-1" \
-            -o data/public-bank.json
+          # 先訪問主頁取得 cookie
+          scraper.get('https://www.wantgoo.com/stock/public-bank/trend', headers=headers)
 
-          echo "--- Response preview ---"
-          head -c 200 data/public-bank.json
+          # 抓 API
+          r = scraper.get(
+              'https://www.wantgoo.com/stock/public-bank/trend-data?market=-1',
+              headers=headers
+          )
+          print(f'Status: {r.status_code}')
+          print(f'Preview: {r.text[:200]}')
 
-          # Step 3：驗證 JSON
-          python3 -c "
-          import json
-          with open('data/public-bank.json') as f:
-              d = json.load(f)
-          assert isinstance(d, list) and len(d) > 0, f'Invalid: {str(d)[:100]}'
-          print(f'OK: {len(d)} records, latest: {d[0][\"date\"][:10]}')
-          "
+          data = r.json()
+          assert isinstance(data, list) and len(data) > 0, f'Invalid data: {str(data)[:100]}'
+
+          import os
+          os.makedirs('data', exist_ok=True)
+          with open('data/public-bank.json', 'w', encoding='utf-8') as f:
+              json.dump(data, f, ensure_ascii=False)
+
+          print(f'OK: {len(data)} records, latest: {data[0]["date"][:10]}')
+          EOF
 
       - name: Commit & Push
         run: |
