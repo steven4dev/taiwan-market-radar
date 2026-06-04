@@ -43,15 +43,18 @@ jobs:
               locale: 'zh-TW',
             });
 
+            // 隱藏 webdriver 旗標，避免 Cloudflare 偵測
+            await context.addInitScript(() => {
+              Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            });
+
             const page = await context.newPage();
 
-            // 攔截 trend-data API 回應
-            let bankData = null;
-            page.on('response', async (response) => {
-              if (response.url().includes('trend-data') && response.status() === 200) {
-                try { bankData = await response.json(); } catch(e) {}
-              }
-            });
+            // 先設好等待 trend-data 回應（在 goto 之前，避免錯過）
+            const responsePromise = page.waitForResponse(
+              r => r.url().includes('trend-data') && r.status() === 200,
+              { timeout: 90000 }
+            );
 
             console.log('Navigating to wantgoo...');
             await page.goto('https://www.wantgoo.com/stock/public-bank/trend', {
@@ -59,25 +62,10 @@ jobs:
               timeout: 90000,
             });
 
-            // 等 Cloudflare challenge 通過後頁面穩定（最多 15 秒）
-            try {
-              await page.waitForSelector('table', { timeout: 15000 });
-              console.log('Table found, page loaded.');
-            } catch(e) {
-              console.log('Table not found, waiting 8s for Cloudflare...');
-              await page.waitForTimeout(8000);
-            }
-
-            // 若攔截失敗，從頁面 context 直接 fetch（已有 cookie，不受 CORS 限制）
-            if (!bankData) {
-              console.log('Interceptor missed, fetching via page context...');
-              bankData = await page.evaluate(async () => {
-                const r = await fetch('/stock/public-bank/trend-data?market=-1', {
-                  headers: { 'Accept': 'application/json' }
-                });
-                return r.json();
-              });
-            }
+            console.log('Waiting for trend-data API response...');
+            const apiResponse = await responsePromise;
+            const bankData = await apiResponse.json();
+            console.log(`API response received: ${bankData.length} records`);
 
             if (!Array.isArray(bankData) || bankData.length === 0) {
               throw new Error('Invalid data: ' + JSON.stringify(bankData).slice(0, 100));
