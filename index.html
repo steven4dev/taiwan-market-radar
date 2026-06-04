@@ -324,12 +324,12 @@
             if (taiexData.length < 20) throw new Error('TAIEX 資料不足以判斷分水嶺');
 
             // ── 自動偵測最近擺盪低點 ──────────────────────────────
-            // 定義：左右各 5 個交易日內的局部最低收盤，且之後確實往上走
-            // 回看範圍：最近 3 個月（約 65 個交易日）
+            // 定義：左右各 3 個交易日內的局部最低收盤，且之後 2 天有往上走
+            // 回看範圍：最近 2 個月（約 44 個交易日）
             // 不設反彈 % 門檻 — 轉頭本身即為意義
-            const WIN      = 5;
-            const SCAN_END = taiexData.length - WIN - 1;  // 排除最近 5 日（未確認）
-            const SCAN_BGN = Math.max(WIN, taiexData.length - 65); // 近 3 個月
+            const WIN      = 3;
+            const SCAN_END = taiexData.length - 2;  // 排除最後 1 日（當日未收盤確認）
+            const SCAN_BGN = Math.max(WIN, taiexData.length - 44); // 近 2 個月
 
             let pivotLow = null;
             for (let i = SCAN_END; i >= SCAN_BGN; i--) {
@@ -337,16 +337,16 @@
               const localMin = Math.min(...windowPrices);
               if (taiexData[i].close > localMin) continue; // 不是局部最低
 
-              // 確認之後有往上走（後 5 日最高 > 低點收盤）
-              const afterSlice = taiexData.slice(i + 1, i + WIN + 2);
+              // 確認之後有往上走（後 2 日內有收盤 > 低點）
+              const afterSlice = taiexData.slice(i + 1, i + 3);
               const afterHigh  = afterSlice.length ? Math.max(...afterSlice.map(d => d.close)) : 0;
-              if (afterHigh <= taiexData[i].close) continue; // 沒有轉頭
+              if (afterSlice.length === 0 || afterHigh <= taiexData[i].close) continue;
 
               pivotLow = taiexData[i];
               break;
             }
 
-            if (!pivotLow) throw new Error('近 3 個月無法偵測到有效擺盪低點');
+            if (!pivotLow) throw new Error('近 2 個月無法偵測到有效擺盪低點');
 
             const KEY_LOW  = pivotLow.close;
             const KEY_DATE = pivotLow.date;
