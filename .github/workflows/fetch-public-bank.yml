@@ -4,7 +4,7 @@ on:
   schedule:
     # 台灣時間 18:30（UTC 10:30），週一至週五盤後執行
     - cron: '30 10 * * 1-5'
-  workflow_dispatch:  # 允許手動觸發
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,48 +16,70 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
+          node-version: '20'
 
-      - name: Install cloudscraper
-        run: pip install cloudscraper
-
-      - name: Fetch 八大公股銀行資料
+      - name: Install Playwright
         run: |
-          python3 << 'EOF'
-          import cloudscraper, json, sys
+          npm install playwright
+          npx playwright install chromium --with-deps
 
-          scraper = cloudscraper.create_scraper(
-              browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
-          )
-          headers = {
-              'Referer': 'https://www.wantgoo.com/stock/public-bank/trend',
-              'Accept': 'application/json, text/plain, */*',
-              'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-          }
+      - name: Fetch 八大公股銀行資料（Playwright）
+        run: |
+          node << 'EOF'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
 
-          # 先訪問主頁取得 cookie
-          scraper.get('https://www.wantgoo.com/stock/public-bank/trend', headers=headers)
+          (async () => {
+            const browser = await chromium.launch({
+              headless: true,
+              args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
 
-          # 抓 API
-          r = scraper.get(
-              'https://www.wantgoo.com/stock/public-bank/trend-data?market=-1',
-              headers=headers
-          )
-          print(f'Status: {r.status_code}')
-          print(f'Preview: {r.text[:200]}')
+            const context = await browser.newContext({
+              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              locale: 'zh-TW',
+            });
 
-          data = r.json()
-          assert isinstance(data, list) and len(data) > 0, f'Invalid data: {str(data)[:100]}'
+            const page = await context.newPage();
 
-          import os
-          os.makedirs('data', exist_ok=True)
-          with open('data/public-bank.json', 'w', encoding='utf-8') as f:
-              json.dump(data, f, ensure_ascii=False)
+            // 攔截 trend-data API 回應
+            let bankData = null;
+            page.on('response', async (response) => {
+              if (response.url().includes('trend-data') && response.status() === 200) {
+                try { bankData = await response.json(); } catch(e) {}
+              }
+            });
 
-          print(f'OK: {len(data)} records, latest: {data[0]["date"][:10]}')
+            console.log('Navigating to wantgoo...');
+            await page.goto('https://www.wantgoo.com/stock/public-bank/trend', {
+              waitUntil: 'networkidle',
+              timeout: 60000,
+            });
+
+            // 若攔截失敗，從頁面 context 直接 fetch（已有 cookie，不受 CORS 限制）
+            if (!bankData) {
+              console.log('Interceptor missed, fetching via page context...');
+              bankData = await page.evaluate(async () => {
+                const r = await fetch('/stock/public-bank/trend-data?market=-1', {
+                  headers: { 'Accept': 'application/json' }
+                });
+                return r.json();
+              });
+            }
+
+            if (!Array.isArray(bankData) || bankData.length === 0) {
+              throw new Error('Invalid data: ' + JSON.stringify(bankData).slice(0, 100));
+            }
+
+            fs.mkdirSync('data', { recursive: true });
+            fs.writeFileSync('data/public-bank.json', JSON.stringify(bankData));
+            console.log(`OK: ${bankData.length} records, latest: ${bankData[0].date.slice(0,10)}`);
+
+            await browser.close();
+          })().catch(err => { console.error(err); process.exit(1); });
           EOF
 
       - name: Commit & Push
