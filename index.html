@@ -260,14 +260,15 @@
         : revData.declining ? 'yellow'
         : revData.yoy < 5 ? 'yellow' : 'green';
       const s2Desc = !revData ? '月營收資料載入中...'
-        : `台積電月營收 YoY ${revData.yoy > 0 ? '+' : ''}${revData.yoy?.toFixed(1)}%${revData.declining ? '，連續萎縮中' : ''}`;
+        : revData.yoy == null ? '月營收資料計算中...'
+        : `台積電月營收 YoY ${revData.yoy > 0 ? '+' : ''}${revData.yoy.toFixed(1)}%${revData.declining ? '，連續萎縮中' : ''}`;
 
       // Signal 3：短線漲幅過高（TAIEX 近 20 日）
-      const rally = m5?.rally20d;
-      const s3Triggered = rally !== null && rally > 15;
-      const s3Status = rally === null ? 'yellow'
+      const rally = m5?.rally20d ?? null;
+      const s3Triggered = rally != null && rally > 15;
+      const s3Status = rally == null ? 'yellow'
         : rally > 20 ? 'red' : rally > 12 ? 'yellow' : 'green';
-      const s3Desc = rally !== null
+      const s3Desc = rally != null
         ? `大盤近20日漲幅 ${rally > 0 ? '+' : ''}${rally.toFixed(1)}%（${rally > 20 ? '漲幅過大' : rally > 12 ? '漲幅偏高' : '正常'}）`
         : '技術面資料載入中...';
 
