@@ -55,9 +55,18 @@ jobs:
 
             console.log('Navigating to wantgoo...');
             await page.goto('https://www.wantgoo.com/stock/public-bank/trend', {
-              waitUntil: 'networkidle',
-              timeout: 60000,
+              waitUntil: 'load',
+              timeout: 90000,
             });
+
+            // 等 Cloudflare challenge 通過後頁面穩定（最多 15 秒）
+            try {
+              await page.waitForSelector('table', { timeout: 15000 });
+              console.log('Table found, page loaded.');
+            } catch(e) {
+              console.log('Table not found, waiting 8s for Cloudflare...');
+              await page.waitForTimeout(8000);
+            }
 
             // 若攔截失敗，從頁面 context 直接 fetch（已有 cookie，不受 CORS 限制）
             if (!bankData) {
