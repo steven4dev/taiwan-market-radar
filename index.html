@@ -476,15 +476,14 @@
               { dataset:'TaiwanStockMarginPurchaseShortsale', dataId:'TAIEX' },
             ], token, recentDate);
 
-            // 同時抓融資與融券
+            // 每日有三種 row，依 name 欄位區分
+            // name: "MarginPurchase" → 融資餘額（張）
+            // name: "ShortSale"      → 融券餘額（張）
             const byDate = {};
             data.forEach(d => {
-              const date = d.date;
-              if (!byDate[date]) byDate[date] = { margin: 0, short: 0 };
-              const margin = Number(d.MarginPurchaseTodayBalance) || Number(d.TodayBalance) || 0;
-              const short  = Number(d.ShortSaleTodayBalance) || 0;
-              if (margin) byDate[date].margin = margin;
-              if (short)  byDate[date].short  = short;
+              if (!byDate[d.date]) byDate[d.date] = { margin: 0, short: 0 };
+              if (d.name === 'MarginPurchase') byDate[d.date].margin = Number(d.TodayBalance) || 0;
+              if (d.name === 'ShortSale')      byDate[d.date].short  = Number(d.TodayBalance) || 0;
             });
 
             const sortedDates = Object.keys(byDate).sort().filter(d => byDate[d].margin > 0);
