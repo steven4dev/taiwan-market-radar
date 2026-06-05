@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>更新公股銀行資料</title>
+  <style>
+    body { background:#111827; color:#fff; font-family:sans-serif; padding:40px; max-width:700px; margin:0 auto; }
+    h1 { color:#22c55e; }
+    pre { background:#1f2937; padding:16px; border-radius:8px; font-size:13px; overflow-x:auto; color:#86efac; }
+    .step { background:#1f2937; border:1px solid #374151; border-radius:12px; padding:20px; margin:16px 0; }
+    .step h3 { margin:0 0 8px; color:#facc15; }
+    .btn { background:#22c55e; color:#000; border:none; padding:12px 24px; border-radius:8px; font-size:15px; cursor:pointer; font-weight:bold; }
+    .btn:hover { background:#16a34a; }
+    .success { background:#052e16; border:1px solid #22c55e; border-radius:8px; padding:16px; color:#86efac; display:none; }
+    #status { margin-top:16px; color:#f87171; }
+  </style>
+</head>
+<body>
+  <h1>⚡ 更新八大公股銀行資料</h1>
+  <p style="color:#9ca3af">由於 wantgoo.com 的 CORS 限制，請依以下步驟手動更新資料：</p>
+
+  <div class="step">
+    <h3>步驟 1 — 在 wantgoo.com 開啟瀏覽器 Console</h3>
+    <p style="color:#d1d5db">開啟 <a href="https://www.wantgoo.com/stock/public-bank/trend" target="_blank" style="color:#60a5fa">wantgoo 八大公股銀行頁面</a>，按 <strong>F12</strong> 開啟 DevTools，切換到 <strong>Console</strong> 分頁。</p>
+  </div>
+
+  <div class="step">
+    <h3>步驟 2 — 貼上並執行以下指令</h3>
+    <p style="color:#d1d5db">複製下方程式碼，貼入 Console 後按 Enter：</p>
+    <pre id="snippet">fetch('/stock/public-bank/trend-data?market=-1')
+  .then(r => r.json())
+  .then(d => {
+    const url = 'https://steven4dev.github.io/taiwan-market-radar/update-bank.html#' + btoa(unescape(encodeURIComponent(JSON.stringify(d))));
+    window.open(url, '_blank');
+  });</pre>
+    <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('snippet').textContent).then(()=>{this.textContent='✅ 已複製！';setTimeout(()=>this.textContent='複製指令',2000)})">複製指令</button>
+  </div>
+
+  <div class="step">
+    <h3>步驟 3 — 回到此頁，資料會自動儲存</h3>
+    <p style="color:#d1d5db">執行指令後會開啟此頁新分頁，資料自動寫入 localStorage。</p>
+    <div id="status">等待資料...</div>
+    <div class="success" id="successMsg">✅ 資料儲存成功！返回主頁面即可看到 M7 公股銀行動向。</div>
+    <a href="/" style="color:#60a5fa; display:block; margin-top:12px;">← 返回主頁</a>
+  </div>
+
+  <script>
+    // Try to read data from URL hash
+    function tryLoadFromHash() {
+      const hash = location.hash.slice(1);
+      if (!hash) { document.getElementById('status').textContent = '尚未收到資料，請依步驟操作。'; return; }
+      try {
+        const data = JSON.parse(decodeURIComponent(escape(atob(hash))));
+        if (!Array.isArray(data) || data.length === 0) throw new Error('invalid');
+        localStorage.setItem('wantgoo-bank-data', JSON.stringify(data));
+        localStorage.setItem('wantgoo-bank-updated', new Date().toISOString());
+        document.getElementById('status').style.display = 'none';
+        document.getElementById('successMsg').style.display = 'block';
+        console.log('Saved', data.length, 'records');
+      } catch(e) {
+        document.getElementById('status').textContent = '資料解析失敗：' + e.message;
+      }
+    }
+    tryLoadFromHash();
+
+    // Also check if already have data
+    const existing = localStorage.getItem('wantgoo-bank-data');
+    if (existing) {
+      const updated = localStorage.getItem('wantgoo-bank-updated');
+      document.getElementById('status').textContent = `已有快取資料（更新時間：${updated ? new Date(updated).toLocaleString('zh-TW') : '未知'}）`;
+    }
+  </script>
+</body>
+</html>

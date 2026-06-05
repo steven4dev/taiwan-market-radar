@@ -729,11 +729,23 @@
               mega: '兆豐', tbb: '台企銀', chb: '彰銀', first: '第一金',
             };
 
-            // 讀取 GitHub Action 每日更新的本地 JSON（同網域，無 CORS 問題）
-            const res = await fetch('./data/public-bank.json');
-            if (!res.ok) throw new Error('public-bank.json 尚未產生，請手動觸發 GitHub Action');
-            const raw = await res.json();
-            if (!Array.isArray(raw) || raw.length === 0) throw new Error('公股銀行資料格式異常');
+            // 1. 先嘗試 GitHub Action 每日更新的 JSON
+            // 2. fallback 到 localStorage（由 update-bank.html 橋接寫入）
+            let raw = null;
+            try {
+              const res = await fetch('./data/public-bank.json');
+              if (res.ok) raw = await res.json();
+            } catch(e) {}
+
+            if (!raw || raw.length === 0) {
+              const cached = localStorage.getItem('wantgoo-bank-data');
+              if (cached) {
+                raw = JSON.parse(cached);
+                console.log('[M7] Using localStorage cache');
+              }
+            }
+
+            if (!raw || raw.length === 0) throw new Error('公股銀行資料尚未建立。請前往 update-bank.html 依指示更新一次。');
 
             // 由新到舊排序，計算每日合計
             const series = raw
