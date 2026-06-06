@@ -230,7 +230,7 @@
 
       const ROWS_DEF = [
         { id:'M1', label:'大盤',  type:'line', color:'#e5e7eb', fmt: v => v != null ? v.toLocaleString() : '—' },
-        { id:'M7', label:'外部',  type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
+        { id:'M7', label:'外部↑1', type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
         { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
@@ -993,7 +993,7 @@
 
             setModuleData(prev => ({...prev, M7: {
               status,
-              alignedData: soxData.slice(-60).map(d => ({ date: d.date, value: d.close })),
+              alignedData: (() => { const s = soxData.slice(-61); return s.slice(0,-1).map((d,i) => ({ date: s[i+1].date, value: d.close })); })(),
               summary: `${displayName} 近 5 日漲跌幅為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
               chartTitle: `${displayName} 走勢 (近3個月)`,
               renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
