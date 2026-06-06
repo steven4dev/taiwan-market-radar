@@ -671,7 +671,6 @@
       const [moduleErrors, setModuleErrors] = useState({});
       const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true });
       const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false });
-      const [showAligned, setShowAligned] = useState(false);
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
@@ -1298,14 +1297,8 @@
             {/* 下車警示 */}
             <ExitSignalBlock score={score} moduleData={moduleData} revData={revData} />
 
-            {/* 全部展開/收折 + 對齊圖表 */}
+            {/* 全部展開/收折 */}
             <div className="flex justify-end gap-2 mb-4">
-              <button
-                onClick={() => setShowAligned(v => !v)}
-                className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm transition-colors ${showAligned ? 'bg-indigo-700 border-indigo-500 text-white' : 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-300'}`}
-              >
-                📐 {showAligned ? '隱藏對齊圖表' : '對齊圖表'}
-              </button>
               <button
                 onClick={handleToggleAll}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-300 transition-colors"
@@ -1333,7 +1326,7 @@
             </div>
 
             {/* 對齊圖表面板 */}
-            {showAligned && <div className="mt-6"><AlignedChartPanel moduleData={moduleData} /></div>}
+            <div className="mt-6"><AlignedChartPanel moduleData={moduleData} /></div>
 
             {/* 錯誤提示 */}
             {Object.values(moduleErrors).some(Boolean) && (
