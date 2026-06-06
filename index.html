@@ -536,9 +536,9 @@
       ];
 
       const triggeredCount = signals.filter(s => s.triggered).length;
-      const riskColor = triggeredCount >= 3 ? 'text-green-400' : triggeredCount >= 2 ? 'text-orange-400' : triggeredCount === 1 ? 'text-yellow-400' : 'text-red-400';
-      const riskLabel = triggeredCount >= 3 ? '高風險，建議減碼' : triggeredCount === 2 ? '中風險，注意觀察' : triggeredCount === 1 ? '低風險，留意訊號' : '目前無下車訊號';
-      const borderColor = triggeredCount >= 3 ? 'border-red-800' : triggeredCount >= 2 ? 'border-orange-800' : triggeredCount === 1 ? 'border-yellow-800' : 'border-gray-700';
+      const riskColor = triggeredCount >= 4 ? 'text-green-400' : triggeredCount >= 2 ? 'text-orange-400' : triggeredCount === 1 ? 'text-yellow-400' : 'text-red-400';
+      const riskLabel = triggeredCount >= 4 ? '高風險，建議減碼' : triggeredCount >= 2 ? '中風險，注意觀察' : triggeredCount === 1 ? '低風險，留意訊號' : '目前無下車訊號';
+      const borderColor = triggeredCount >= 4 ? 'border-red-800' : triggeredCount >= 2 ? 'border-orange-800' : triggeredCount === 1 ? 'border-yellow-800' : 'border-gray-700';
 
       const dotColors = { red: '#22c55e', yellow: '#eab308', green: '#ef4444' };
 
@@ -550,7 +550,7 @@
             </h2>
             <div className="flex items-center gap-2 bg-gray-900/60 px-4 py-1.5 rounded-full border border-gray-700">
               <span className={`text-2xl font-black ${riskColor}`}>{triggeredCount}</span>
-              <span className="text-gray-400 text-sm">/ 4 訊號觸發</span>
+              <span className="text-gray-400 text-sm">/ {signals.length} 訊號觸發</span>
               <span className={`text-sm font-medium ${riskColor} ml-1`}>— {riskLabel}</span>
             </div>
           </div>
