@@ -61,15 +61,15 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     const MODULE_CONFIG = {
-      M0: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
-      M1: { weight: 0.16, title: '權值股健康度', icon: 'Activity' },
-      M2: { weight: 0.16, title: '法人動向',     icon: 'Users' },
-      M3: { weight: 0.10, title: '籌碼面',       icon: 'PieChart' },
-      M4: { weight: 0.06, title: '量能結構',     icon: 'BarChart2' },
-      M5: { weight: 0.10, title: '技術面',       icon: 'TrendingUp' },
-      M6: { weight: 0.06, title: '外部環境',     icon: 'Globe' },
-      M7: { weight: 0.08, title: '公股銀行動向', icon: 'Building2' },
-      M8: { weight: 0.12, title: '夜盤動向',     icon: 'Moon' },
+      M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
+      M2: { weight: 0.16, title: '權值股健康度', icon: 'Activity' },
+      M3: { weight: 0.16, title: '法人動向',     icon: 'Users' },
+      M4: { weight: 0.10, title: '籌碼面',       icon: 'PieChart' },
+      M5: { weight: 0.06, title: '量能結構',     icon: 'BarChart2' },
+      M6: { weight: 0.10, title: '技術面',       icon: 'TrendingUp' },
+      M7: { weight: 0.06, title: '外部環境',     icon: 'Globe' },
+      M8: { weight: 0.08, title: '公股銀行動向', icon: 'Building2' },
+      M9: { weight: 0.12, title: '夜盤動向',     icon: 'Moon' },
     };
 
     const SCORE_LABELS = [
@@ -246,8 +246,8 @@
     // 4. 下車警示區塊
     // ==========================================
     const ExitSignalBlock = ({ score, moduleData, revData }) => {
-      const m0  = moduleData.M0;
-      const m5  = moduleData.M5;
+      const m0  = moduleData.M1;
+      const m5  = moduleData.M6;
 
       // Signal 1：大盤情緒過熱（由多空評分推算）
       const greedScore = score ?? 0;
@@ -274,7 +274,7 @@
         ? `大盤近20日漲幅 ${rally > 0 ? '+' : ''}${rally.toFixed(1)}%（${rally > 20 ? '漲幅過大' : rally > 12 ? '漲幅偏高' : '正常'}）`
         : '技術面資料載入中...';
 
-      // Signal 4：跌破股神指標（M0 分水嶺）
+      // Signal 4：跌破股神指標（M1 分水嶺）
       const s4Triggered = m0?.status === 'red';
       const s4Status = !m0 ? 'yellow' : m0.status === 'red' ? 'red' : 'green';
       const s4Desc = !m0 ? '分水嶺資料載入中...'
@@ -282,16 +282,16 @@
           ? `已跌破分水嶺，嚴守紀律停損出場`
           : `持守分水嶺以上，持倉安全`;
 
-      // Signal 5：夜盤重跌 × 公股無護盤（M7 × M8 聯合訊號）
-      const m7 = moduleData.M7;
-      const m8 = moduleData.M8;
+      // Signal 5：夜盤重跌 × 公股無護盤（M8 × M9 聯合訊號）
+      const m7 = moduleData.M8;
+      const m8 = moduleData.M9;
       const s5BothLoaded = m7 && m8;
       const s5Triggered  = s5BothLoaded && m8.status === 'red' && m7.status === 'red';
       const s5Status = !s5BothLoaded ? 'yellow'
         : s5Triggered ? 'red'
         : (m8.status === 'red' && m7.status === 'green') ? 'yellow'
         : 'green';
-      const s5Desc = !s5BothLoaded ? 'M7/M8 資料載入中...'
+      const s5Desc = !s5BothLoaded ? 'M8/M9 資料載入中...'
         : s5Triggered ? `夜盤大跌且公股銀行同步看空，明日開盤風險極高`
         : (m8.status === 'red' && m7.status === 'green') ? `夜盤偏空，但公股買超可緩衝跌幅`
         : (m8.status === 'green' && m7.status === 'green') ? `夜盤與公股同步看多，市場信心穩固`
@@ -302,7 +302,7 @@
         { num: '②', label: '月營收警訊',     desc: s2Desc, status: s2Status, triggered: s2Triggered, tip: '同業差/衰退/沒創新高 → 減碼' },
         { num: '③', label: '短線漲幅過高',   desc: s3Desc, status: s3Status, triggered: s3Triggered, tip: '近20日漲幅 > 15% → 先減碼' },
         { num: '④', label: '跌破股神指標',   desc: s4Desc, status: s4Status, triggered: s4Triggered, tip: '跌破分水嶺，嚴守紀律停損' },
-        { num: '⑤', label: '夜盤重跌無護盤', desc: s5Desc, status: s5Status, triggered: s5Triggered, tip: 'M8夜盤↓ + M7公股↓ → 雙重利空' },
+        { num: '⑤', label: '夜盤重跌無護盤', desc: s5Desc, status: s5Status, triggered: s5Triggered, tip: 'M9夜盤↓ + M8公股↓ → 雙重利空' },
       ];
 
       const triggeredCount = signals.filter(s => s.triggered).length;
@@ -353,26 +353,26 @@
       const IconComp = Icons[config.icon];
       const statusText = { green: '多方 / 健康', yellow: '中立 / 注意', red: '空方 / 警示' };
 
-      // M7 ↔ M8 互相關聯提示
+      // M8 ↔ M9 互相關聯提示
       let crossRef = null;
       if (data && !loading && !error) {
-        const m7 = allModuleData?.M7;
-        const m8 = allModuleData?.M8;
-        if (id === 'M8' && m7) {
+        const m7 = allModuleData?.M8;
+        const m8 = allModuleData?.M9;
+        if (id === 'M9' && m7) {
           if (data.status === 'red' && m7.status === 'green')
-            crossRef = { color: 'text-yellow-400', text: '⚡ M7 公股銀行仍在買超，明日或有護盤介入，跌幅可能被壓縮。' };
+            crossRef = { color: 'text-yellow-400', text: '⚡ M8 公股銀行仍在買超，明日或有護盤介入，跌幅可能被壓縮。' };
           else if (data.status === 'red' && m7.status === 'red')
-            crossRef = { color: 'text-red-400', text: '🔴 M7 公股銀行同步看空，雙重利空確認，明日開盤風險顯著偏高。' };
+            crossRef = { color: 'text-red-400', text: '🔴 M8 公股銀行同步看空，雙重利空確認，明日開盤風險顯著偏高。' };
           else if (data.status === 'green' && m7.status === 'green')
-            crossRef = { color: 'text-green-400', text: '✅ M7 公股銀行同步看多，籌碼與夜盤情緒共振，多方訊號可信度提升。' };
+            crossRef = { color: 'text-green-400', text: '✅ M8 公股銀行同步看多，籌碼與夜盤情緒共振，多方訊號可信度提升。' };
         }
-        if (id === 'M7' && m8) {
+        if (id === 'M8' && m8) {
           if (m8.status === 'red' && data.status === 'green')
-            crossRef = { color: 'text-yellow-400', text: '⚡ M8 夜盤大跌，但公股持續買超，預計明日有護盤行為。' };
+            crossRef = { color: 'text-yellow-400', text: '⚡ M9 夜盤大跌，但公股持續買超，預計明日有護盤行為。' };
           else if (m8.status === 'red' && data.status === 'red')
-            crossRef = { color: 'text-red-400', text: '🔴 M8 夜盤同步看空，無公股護盤緩衝，市場壓力倍增。' };
+            crossRef = { color: 'text-red-400', text: '🔴 M9 夜盤同步看空，無公股護盤緩衝，市場壓力倍增。' };
           else if (m8.status === 'green' && data.status === 'green')
-            crossRef = { color: 'text-green-400', text: '✅ M8 夜盤同步看多，期貨情緒與公股籌碼共振，多方信心增強。' };
+            crossRef = { color: 'text-green-400', text: '✅ M9 夜盤同步看多，期貨情緒與公股籌碼共振，多方信心增強。' };
         }
       }
 
@@ -437,17 +437,17 @@
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [revData, setRevData] = useState(null);
-      const [moduleData, setModuleData] = useState({ M0:null, M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null });
+      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null });
       const [moduleErrors, setModuleErrors] = useState({});
-      const [moduleLoading, setModuleLoading] = useState({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true });
-      const [expandedCards, setExpandedCards] = useState({ M0:false, M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false });
+      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true });
+      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false });
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
       const fetchAllData = async () => {
         setIsRefreshing(true);
         setModuleErrors({});
-        setModuleLoading({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true });
+        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true });
 
         const startDate  = getPastDateString(8);
         const recentDate = getPastDateString(3);
@@ -496,7 +496,7 @@
             // 圖表：近 120 日 TAIEX + 分水嶺水平線
             const chartData = taiexData.slice(-120).map(d => ({ ...d, keyLevel: KEY_LOW }));
 
-            setModuleData(prev => ({...prev, M0: {
+            setModuleData(prev => ({...prev, M1: {
               status,
               summary: `自動偵測分水嶺：${KEY_DATE} 收盤低點 ${KEY_LOW.toLocaleString()}。當前大盤 ${current.close.toLocaleString()}，${isAbove ? '✅ 站上' : '❌ 跌破'}分水嶺 ${diff > 0 ? '+' : ''}${Math.round(diff)}（${diffPct}%）。`,
               chartTitle: `加權指數 vs 自動分水嶺 ${KEY_LOW.toLocaleString()}（紅線）`,
@@ -516,11 +516,11 @@
                 />
               ),
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M0:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M0:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M1:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M1:false})); }
         };
 
-        // M1
+        // M2
         const processM1 = async () => {
           try {
             const [tsmc, delta, mtk] = await Promise.all([
@@ -544,7 +544,7 @@
             if (aboveCount === 2) status = 'yellow';
             if (aboveCount <= 1 || !tsmcAbove) status = 'red';
 
-            setModuleData(prev => ({...prev, M1: {
+            setModuleData(prev => ({...prev, M2: {
               status,
               summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，聯發科(2454)${mtkAbove?'站上':'跌破'}季線。共 ${aboveCount} 檔核心權值股位於季線之上。`,
               chartTitle: '權值股近期走勢 (過去 120 日)',
@@ -564,11 +564,11 @@
                 </div>
               ),
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M1:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M1:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M2:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M2:false})); }
         };
 
-        // M2
+        // M3
         const processM2 = async () => {
           try {
             const data = await fetchFinMindFallback([
@@ -593,14 +593,14 @@
             if (last5Total > 100) status = 'green';
             if (last5Total < -100) status = 'red';
 
-            setModuleData(prev => ({...prev, M2: {
+            setModuleData(prev => ({...prev, M3: {
               status,
               summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
               chartTitle: '外資近 30 日大盤買賣超 (億元)',
               renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#22c55e' : '#ef4444'} />,
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M2:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M2:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M3:false})); }
         };
 
         // M3 籌碼乾淨度
@@ -666,7 +666,7 @@
 
             const fmt = v => v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1);
 
-            setModuleData(prev => ({...prev, M3: {
+            setModuleData(prev => ({...prev, M4: {
               status,
               summary: `籌碼${cleanLabel}（乾淨度 ${Math.round(cleanScore)}/100）。融資水位處近期 ${Math.round(marginPct)}% 分位，近6日${marginTrend < 0 ? '縮減' : '增加'} ${fmt(marginTrend)}%；融券/融資比 ${cur.ratio.toFixed(2)}%，處近期 ${Math.round(ratioPct)}% 分位。`,
               chartTitle: '融資餘額（紫）與融券/融資比（橙）近30日',
@@ -683,11 +683,11 @@
                 </div>
               ),
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M3:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M4:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M4:false})); }
         };
 
-        // M4 + M5
+        // M4 + M6
         const processM4M5 = async () => {
           try {
             const raw = await fetchFinMind('TaiwanStockPrice', 'TAIEX', token, startDate);
@@ -706,7 +706,7 @@
             if (volRatio > 1.2 && priceUp)  m4Status = 'green';
             if (volRatio > 1.2 && !priceUp) m4Status = 'red';
 
-            setModuleData(p => ({...p, M4: {
+            setModuleData(p => ({...p, M5: {
               status: m4Status,
               summary: `大盤今日成交量約 ${Math.round(last.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
               chartTitle: '加權指數成交量 (億)',
@@ -723,7 +723,7 @@
             const prev20 = td.length >= 21 ? td[td.length - 21].close : null;
             const rally20d = prev20 ? ((last.close - prev20) / prev20) * 100 : null;
 
-            setModuleData(p => ({...p, M5: {
+            setModuleData(p => ({...p, M6: {
               status: m5Status,
               rally20d,
               summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線。MACD 值為 ${last.macd.toFixed(1)}。`,
@@ -735,17 +735,17 @@
                 />
               ),
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M4:e.message, M5:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M4:false, M5:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M5:e.message, M6:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M5:false, M6:false})); }
         };
 
-        // M6
+        // M7
         const processM6 = async () => {
           try {
             let soxData, displayName;
             for (const item of [{code:'^SOX',name:'費城半導體指數 (^SOX)'},{code:'SOXX',name:'費半 ETF (SOXX)'},{code:'TSM',name:'台積電 ADR (TSM)'}]) {
               try { soxData = await fetchYahoo(item.code); displayName = item.name; break; }
-              catch(e) { console.warn(`[M6] ${item.code} failed`); }
+              catch(e) { console.warn(`[M7] ${item.code} failed`); }
             }
             if (!soxData || soxData.length < 5) throw new Error('外部資料連線異常');
 
@@ -757,17 +757,17 @@
             if (rate > 2)  status = 'green';
             if (rate < -3) status = 'red';
 
-            setModuleData(prev => ({...prev, M6: {
+            setModuleData(prev => ({...prev, M7: {
               status,
               summary: `${displayName} 近 5 日漲跌幅為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
               chartTitle: `${displayName} 走勢 (近3個月)`,
               renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M6:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M6:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M7:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M7:false})); }
         };
 
-        // M7 公股銀行動向
+        // M8 公股銀行動向
         const processM7 = async () => {
           try {
             const BANKS = {
@@ -787,7 +787,7 @@
               const cached = localStorage.getItem('wantgoo-bank-data');
               if (cached) {
                 raw = JSON.parse(cached);
-                console.log('[M7] Using localStorage cache');
+                console.log('[M8] Using localStorage cache');
               }
             }
 
@@ -831,7 +831,7 @@
 
             const fmt = v => `${v > 0 ? '+' : ''}${(v / 10000).toFixed(1)}億`;
 
-            setModuleData(prev => ({...prev, M7: {
+            setModuleData(prev => ({...prev, M8: {
               status,
               summary: `八大公股銀行近5日合計 ${fmt(sum5)}（萬元）。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
               chartTitle: '八大公股銀行每日買賣超合計 (萬元，近60日)',
@@ -844,8 +844,8 @@
                 />
               ),
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M7:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M7:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M8:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M8:false})); }
         };
 
         // 台積電月營收（下車警示 Signal 2）
@@ -867,7 +867,7 @@
           } catch(e) { console.warn('[Revenue]', e.message); }
         };
 
-        // M8 夜盤動向（台指期 after_market session）
+        // M9 夜盤動向（台指期 after_market session）
         const processM8 = async () => {
           try {
             const raw = await fetchFinMind('TaiwanFuturesDaily', 'TX', token, getPastDateString(10));
@@ -911,7 +911,7 @@
             const dirStr = latest.spread_per > 0 ? `上漲 +${latest.spread_per.toFixed(2)}%` : `下跌 ${latest.spread_per.toFixed(2)}%`;
             const basisStr = basis !== null ? `，期現差 ${basis > 0 ? '+' : ''}${Math.round(basis)} 點 (${basisPct}%)` : '';
 
-            setModuleData(prev => ({...prev, M8: {
+            setModuleData(prev => ({...prev, M9: {
               status,
               summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? (latest.spread_per >= 2 ? `單日大漲 ${latest.spread_per.toFixed(1)}%，夜盤強勢看多。` : '夜盤偏多，市場情緒樂觀。') : status === 'red' ? (latest.spread_per <= -2 ? `單日大跌 ${latest.spread_per.toFixed(1)}%，夜盤顯著看空，明日開盤留意風險。` : '夜盤連續偏空，市場情緒謹慎。') : '夜盤方向混合，觀望為宜。'}`,
               chartTitle: '台指期夜盤漲跌幅（近20日，%）',
@@ -924,8 +924,8 @@
                 />
               ),
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M8:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M8:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M9:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M9:false})); }
         };
 
         await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processRevenue()]);
@@ -948,12 +948,12 @@
         });
         if (validWeights === 0) return null;
         let score = Math.round(totalScore / validWeights);
-        // M7 × M8 同向加權修正（±5 分）
-        const m7ok = moduleData.M7 && !moduleLoading.M7 && !moduleErrors.M7;
-        const m8ok = moduleData.M8 && !moduleLoading.M8 && !moduleErrors.M8;
+        // M8 × M9 同向加權修正（±5 分）
+        const m7ok = moduleData.M8 && !moduleLoading.M8 && !moduleErrors.M8;
+        const m8ok = moduleData.M9 && !moduleLoading.M9 && !moduleErrors.M9;
         if (m7ok && m8ok) {
-          if (moduleData.M7.status === 'green' && moduleData.M8.status === 'green') score = Math.min(100, score + 5);
-          if (moduleData.M7.status === 'red'   && moduleData.M8.status === 'red')   score = Math.max(0,   score - 5);
+          if (moduleData.M8.status === 'green' && moduleData.M9.status === 'green') score = Math.min(100, score + 5);
+          if (moduleData.M8.status === 'red'   && moduleData.M9.status === 'red')   score = Math.max(0,   score - 5);
         }
         return score;
       };
@@ -961,7 +961,7 @@
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
       const handleToggleAll = () => {
         const v = !isAllExpanded;
-        setExpandedCards({ M0:v, M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v });
+        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v });
       };
 
       const score = calculateScore();
