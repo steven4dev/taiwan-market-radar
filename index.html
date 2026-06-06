@@ -198,12 +198,13 @@
     };
 
     // ==========================================
-    // 對齊圖表面板（共用 x 軸）
+    // 對齊圖表面板（單一 SVG + 準線 + Tooltip）
     // ==========================================
     const AlignedChartPanel = ({ moduleData }) => {
-      const { useMemo } = React;
+      const { useMemo, useState, useRef, useCallback } = React;
+      const [hovIdx, setHovIdx] = useState(null);
+      const chartRef = useRef(null);
 
-      // 收集所有模組的 alignedData，取日期聯集後排序，預設最多 60 個交易日
       const allDates = useMemo(() => {
         const s = new Set();
         Object.values(moduleData).forEach(d => {
@@ -216,91 +217,191 @@
         <p className="text-gray-500 text-sm text-center py-4">等待各模組資料載入中...</p>
       );
 
-      const rows = [
-        { id:'M1', label:'M1 大盤',  type:'line', color:'#e5e7eb' },
-        { id:'M3', label:'M3 外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
-        { id:'M5', label:'M5 量能',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
-        { id:'M7', label:'M7 外部',  type:'line', color:'#38bdf8' },
-        { id:'M8', label:'M8 公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
-        { id:'M9', label:'M9 夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
+      const ROWS_DEF = [
+        { id:'M1', label:'大盤',  type:'line', color:'#e5e7eb', fmt: v => v != null ? v.toLocaleString() : '—' },
+        { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
+        { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
+        { id:'M7', label:'外部',  type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
+        { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
+        { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
       ];
 
-      const W = 1000, ROW_H = 44, n = allDates.length;
-      const dx = W / n;
-      const barW = dx * 0.75;
+      // 只保留有資料的列
+      const rows = ROWS_DEF.map(r => {
+        const ad = moduleData[r.id]?.alignedData;
+        if (!ad || ad.length === 0) return null;
+        const byDate = Object.fromEntries(ad.map(p => [p.date, p.value]));
+        const vals = ad.map(p => p.value).filter(v => v != null && isFinite(v));
+        if (!vals.length) return null;
+        const maxAbs = r.type === 'bar' ? (Math.max(...vals.map(v => Math.abs(v))) * 1.1 || 1) : null;
+        const lineMin = r.type === 'line' ? Math.min(...vals) : null;
+        const lineMax = r.type === 'line' ? Math.max(...vals) : null;
+        const lineRange = lineMax != null ? (lineMax - lineMin || Math.abs(lineMin) * 0.01 || 1) : null;
+        return { ...r, byDate, vals, maxAbs, lineMin, lineMax, lineRange };
+      }).filter(Boolean);
 
-      // 每隔幾格顯示一個日期 label
+      const n = allDates.length;
+      const W = 1000;           // SVG viewBox 寬
+      const ROW_H = 52;         // 每列高（SVG 單位）
+      const X_H = 22;           // x 軸高
+      const TOTAL_H = rows.length * ROW_H + X_H;
+      const dx = W / n;
+      const barW = dx * 0.72;
       const labelStep = Math.ceil(n / 8);
-      const labelDates = allDates.filter((_, i) => i % labelStep === 0 || i === n - 1);
+
+      // 游標位置 → 日期索引
+      const handleMouseMove = useCallback(e => {
+        if (!chartRef.current) return;
+        const rect = chartRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const idx = Math.min(n - 1, Math.max(0, Math.floor((x / rect.width) * n)));
+        setHovIdx(idx);
+      }, [n]);
+
+      const hovDate = hovIdx != null ? allDates[hovIdx] : null;
+
+      // Tooltip 左右側切換
+      const tipOnLeft = hovIdx != null && hovIdx > n * 0.62;
 
       return (
         <section className="mb-8 bg-gray-800 rounded-2xl p-5 border border-gray-700 shadow-xl">
-          <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+          <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
             <span>📐</span> 多模組對齊圖表
-            <span className="text-xs font-normal text-gray-400 ml-1">（近 {n} 個交易日，同一 x 軸）</span>
+            <span className="text-xs font-normal text-gray-400">（近 {n} 個交易日 · 滑動查看各模組數值）</span>
           </h2>
 
-          <div className="flex flex-col gap-1">
-            {rows.map(row => {
-              const ad = moduleData[row.id]?.alignedData;
-              if (!ad || ad.length === 0) return null;
-              const byDate = Object.fromEntries(ad.map(p => [p.date, p.value]));
-              const vals = ad.map(p => p.value).filter(v => v != null && isFinite(v));
-              if (vals.length === 0) return null;
+          {/* 標籤欄 + 圖表區 */}
+          <div className="flex gap-0">
 
-              const maxAbs = row.type === 'bar'
-                ? (Math.max(...vals.map(v => Math.abs(v))) * 1.1 || 1)
-                : null;
-              const lineMin = row.type === 'line' ? Math.min(...vals) : null;
-              const lineMax = row.type === 'line' ? Math.max(...vals) : null;
-              const lineRange = lineMax != null ? (lineMax - lineMin || lineMin * 0.01 || 1) : null;
+            {/* 左側 y 標籤 */}
+            <div className="flex flex-col flex-shrink-0" style={{width:'3rem', paddingBottom: X_H}}>
+              {rows.map(r => (
+                <div key={r.id} className="flex items-center justify-end pr-2 text-xs text-gray-500 select-none" style={{height: 56}}>
+                  {r.label}
+                </div>
+              ))}
+            </div>
 
-              return (
-                <div key={row.id} className="flex items-center gap-2">
-                  <div className="text-xs text-gray-400 w-16 text-right flex-shrink-0 select-none">{row.label}</div>
-                  <div className="flex-1 relative rounded overflow-hidden bg-gray-900/40" style={{height: ROW_H}}>
-                    <svg viewBox={`0 0 ${W} ${ROW_H}`} className="w-full h-full" preserveAspectRatio="none">
-                      {/* 中心線（bar）或底線（line） */}
-                      {row.type === 'bar'
-                        ? <line x1="0" y1={ROW_H/2} x2={W} y2={ROW_H/2} stroke="#374151" strokeWidth="0.8" />
-                        : <line x1="0" y1={ROW_H-2} x2={W} y2={ROW_H-2} stroke="#374151" strokeWidth="0.5" />
-                      }
-                      {row.type === 'bar'
-                        ? allDates.map((date, i) => {
-                            const v = byDate[date];
-                            if (v == null) return null;
-                            const barH = Math.max(1, Math.abs(v / maxAbs) * (ROW_H/2 - 2));
-                            const x = i * dx + dx * 0.125;
-                            const y = v >= 0 ? ROW_H/2 - barH : ROW_H/2;
-                            return <rect key={date} x={x} y={y} width={barW} height={barH} fill={row.colorFn(v)} opacity="0.9" />;
-                          })
+            {/* 圖表主體 */}
+            <div
+              ref={chartRef}
+              className="flex-1 relative cursor-crosshair"
+              onMouseMove={handleMouseMove}
+              onMouseLeave={() => setHovIdx(null)}
+            >
+              <svg
+                viewBox={`0 0 ${W} ${TOTAL_H}`}
+                className="w-full block"
+                style={{height: rows.length * 56 + 28}}
+                preserveAspectRatio="none"
+              >
+                {/* 列分隔線 */}
+                {rows.map((_, ri) => (
+                  <line key={ri} x1="0" y1={ri * ROW_H} x2={W} y2={ri * ROW_H} stroke="#1f2937" strokeWidth="1" />
+                ))}
+
+                {/* 各列資料 */}
+                {rows.map((r, ri) => {
+                  const yBase = ri * ROW_H;
+                  const mid = yBase + ROW_H / 2;
+                  return (
+                    <g key={r.id}>
+                      {r.type === 'bar'
+                        ? <>
+                            <line x1="0" y1={mid} x2={W} y2={mid} stroke="#374151" strokeWidth="0.6" />
+                            {allDates.map((date, i) => {
+                              const v = r.byDate[date];
+                              if (v == null) return null;
+                              const barH = Math.max(1, Math.abs(v / r.maxAbs) * (ROW_H / 2 - 3));
+                              const x = i * dx + dx * 0.14;
+                              const y = v >= 0 ? mid - barH : mid;
+                              const fill = r.colorFn(v);
+                              return <rect key={date} x={x} y={y} width={barW} height={barH}
+                                fill={fill} opacity={hovIdx === i ? 1 : 0.8} />;
+                            })}
+                          </>
                         : (() => {
                             let path = '';
                             allDates.forEach((date, i) => {
-                              const v = byDate[date];
+                              const v = r.byDate[date];
                               if (v == null) return;
                               const x = i * dx + dx / 2;
-                              const y = ROW_H - 2 - ((v - lineMin) / lineRange) * (ROW_H - 6);
+                              const y = yBase + (ROW_H - 4) - ((v - r.lineMin) / r.lineRange) * (ROW_H - 8);
                               path += path === '' ? `M ${x} ${y}` : ` L ${x} ${y}`;
                             });
-                            return <path d={path} fill="none" stroke={row.color} strokeWidth="1.8" strokeLinejoin="round" />;
+                            return (
+                              <>
+                                <path d={path} fill="none" stroke={r.color} strokeWidth="1.6" strokeLinejoin="round" />
+                                {hovIdx != null && (() => {
+                                  const v = r.byDate[allDates[hovIdx]];
+                                  if (v == null) return null;
+                                  const cx = hovIdx * dx + dx / 2;
+                                  const cy = yBase + (ROW_H - 4) - ((v - r.lineMin) / r.lineRange) * (ROW_H - 8);
+                                  return <circle cx={cx} cy={cy} r="7" fill={r.color} stroke="#1f2937" strokeWidth="2" />;
+                                })()}
+                              </>
+                            );
                           })()
                       }
-                    </svg>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* X 軸日期 */}
-            <div className="flex ml-[4.5rem] mt-1 relative" style={{height:'14px'}}>
-              <svg viewBox={`0 0 ${W} 14`} className="w-full h-full" preserveAspectRatio="none">
-                {labelDates.map(date => {
-                  const i = allDates.indexOf(date);
-                  const x = i * dx + dx / 2;
-                  return <text key={date} x={x} y="10" textAnchor="middle" fontSize="28" fill="#6b7280">{date.slice(5)}</text>;
+                    </g>
+                  );
                 })}
+
+                {/* X 軸 */}
+                <g>
+                  <line x1="0" y1={rows.length * ROW_H} x2={W} y2={rows.length * ROW_H} stroke="#374151" strokeWidth="1" />
+                  {allDates.map((date, i) => {
+                    if (i % labelStep !== 0 && i !== n - 1) return null;
+                    return (
+                      <text key={date} x={i * dx + dx / 2} y={rows.length * ROW_H + 16}
+                        textAnchor="middle" fontSize="26" fill="#6b7280">{date.slice(5)}</text>
+                    );
+                  })}
+                </g>
+
+                {/* 準線 */}
+                {hovIdx != null && (
+                  <>
+                    <rect x={hovIdx * dx} y="0" width={dx} height={rows.length * ROW_H}
+                      fill="#ffffff" opacity="0.04" />
+                    <line
+                      x1={hovIdx * dx + dx / 2} y1="0"
+                      x2={hovIdx * dx + dx / 2} y2={rows.length * ROW_H}
+                      stroke="#ffffff" strokeWidth="0.8" strokeDasharray="4 3" opacity="0.5"
+                    />
+                    <line
+                      x1={hovIdx * dx + dx / 2} y1={rows.length * ROW_H}
+                      x2={hovIdx * dx + dx / 2} y2={TOTAL_H}
+                      stroke="#ffffff" strokeWidth="0.8" opacity="0.3"
+                    />
+                  </>
+                )}
               </svg>
+
+              {/* Tooltip */}
+              {hovDate && (
+                <div
+                  className="absolute top-2 pointer-events-none z-20 bg-gray-950/95 border border-gray-600 rounded-xl shadow-2xl text-xs p-3 min-w-[148px]"
+                  style={tipOnLeft
+                    ? { right: `${(1 - hovIdx / n) * 100}%`, transform: 'translateX(-12px)' }
+                    : { left:  `${(hovIdx + 1) / n * 100}%`, transform: 'translateX(8px)' }
+                  }
+                >
+                  <p className="text-white font-bold mb-2 border-b border-gray-700 pb-1">{hovDate}</p>
+                  {rows.map(r => {
+                    const v = r.byDate[hovDate];
+                    const col = r.colorFn
+                      ? (v != null ? r.colorFn(v) : '#6b7280')
+                      : r.color;
+                    return (
+                      <div key={r.id} className="flex justify-between items-center gap-4 mb-1">
+                        <span className="text-gray-400">{r.label}</span>
+                        <span className="font-mono font-semibold" style={{color: col}}>{r.fmt(v)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </section>
