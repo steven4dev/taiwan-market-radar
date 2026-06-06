@@ -246,8 +246,8 @@
     // 4. 下車警示區塊
     // ==========================================
     const ExitSignalBlock = ({ score, moduleData, revData }) => {
-      const m0 = moduleData.M0;
-      const m5 = moduleData.M5;
+      const m0  = moduleData.M0;
+      const m5  = moduleData.M5;
 
       // Signal 1：大盤情緒過熱（由多空評分推算）
       const greedScore = score ?? 0;
@@ -282,11 +282,27 @@
           ? `已跌破分水嶺，嚴守紀律停損出場`
           : `持守分水嶺以上，持倉安全`;
 
+      // Signal 5：夜盤重跌 × 公股無護盤（M7 × M8 聯合訊號）
+      const m7 = moduleData.M7;
+      const m8 = moduleData.M8;
+      const s5BothLoaded = m7 && m8;
+      const s5Triggered  = s5BothLoaded && m8.status === 'red' && m7.status === 'red';
+      const s5Status = !s5BothLoaded ? 'yellow'
+        : s5Triggered ? 'red'
+        : (m8.status === 'red' && m7.status === 'green') ? 'yellow'
+        : 'green';
+      const s5Desc = !s5BothLoaded ? 'M7/M8 資料載入中...'
+        : s5Triggered ? `夜盤大跌且公股銀行同步看空，明日開盤風險極高`
+        : (m8.status === 'red' && m7.status === 'green') ? `夜盤偏空，但公股買超可緩衝跌幅`
+        : (m8.status === 'green' && m7.status === 'green') ? `夜盤與公股同步看多，市場信心穩固`
+        : `夜盤與公股方向混合，持續觀察`;
+
       const signals = [
-        { num: '①', label: '大盤情緒過熱', desc: s1Desc, status: s1Status, triggered: s1Triggered, tip: '貪婪指數 > 50 慢慢減碼' },
-        { num: '②', label: '月營收警訊',   desc: s2Desc, status: s2Status, triggered: s2Triggered, tip: '同業差/衰退/沒創新高 → 減碼' },
-        { num: '③', label: '短線漲幅過高', desc: s3Desc, status: s3Status, triggered: s3Triggered, tip: '近20日漲幅 > 15% → 先減碼' },
-        { num: '④', label: '跌破股神指標', desc: s4Desc, status: s4Status, triggered: s4Triggered, tip: '跌破分水嶺，嚴守紀律停損' },
+        { num: '①', label: '大盤情緒過熱',   desc: s1Desc, status: s1Status, triggered: s1Triggered, tip: '貪婪指數 > 50 慢慢減碼' },
+        { num: '②', label: '月營收警訊',     desc: s2Desc, status: s2Status, triggered: s2Triggered, tip: '同業差/衰退/沒創新高 → 減碼' },
+        { num: '③', label: '短線漲幅過高',   desc: s3Desc, status: s3Status, triggered: s3Triggered, tip: '近20日漲幅 > 15% → 先減碼' },
+        { num: '④', label: '跌破股神指標',   desc: s4Desc, status: s4Status, triggered: s4Triggered, tip: '跌破分水嶺，嚴守紀律停損' },
+        { num: '⑤', label: '夜盤重跌無護盤', desc: s5Desc, status: s5Status, triggered: s5Triggered, tip: 'M8夜盤↓ + M7公股↓ → 雙重利空' },
       ];
 
       const triggeredCount = signals.filter(s => s.triggered).length;
@@ -332,10 +348,33 @@
     // ==========================================
     // 5. ModuleCard
     // ==========================================
-    const ModuleCard = ({ id, data, loading, error, isExpanded, onToggle }) => {
+    const ModuleCard = ({ id, data, loading, error, isExpanded, onToggle, allModuleData }) => {
       const config = MODULE_CONFIG[id];
       const IconComp = Icons[config.icon];
       const statusText = { green: '多方 / 健康', yellow: '中立 / 注意', red: '空方 / 警示' };
+
+      // M7 ↔ M8 互相關聯提示
+      let crossRef = null;
+      if (data && !loading && !error) {
+        const m7 = allModuleData?.M7;
+        const m8 = allModuleData?.M8;
+        if (id === 'M8' && m7) {
+          if (data.status === 'red' && m7.status === 'green')
+            crossRef = { color: 'text-yellow-400', text: '⚡ M7 公股銀行仍在買超，明日或有護盤介入，跌幅可能被壓縮。' };
+          else if (data.status === 'red' && m7.status === 'red')
+            crossRef = { color: 'text-red-400', text: '🔴 M7 公股銀行同步看空，雙重利空確認，明日開盤風險顯著偏高。' };
+          else if (data.status === 'green' && m7.status === 'green')
+            crossRef = { color: 'text-green-400', text: '✅ M7 公股銀行同步看多，籌碼與夜盤情緒共振，多方訊號可信度提升。' };
+        }
+        if (id === 'M7' && m8) {
+          if (m8.status === 'red' && data.status === 'green')
+            crossRef = { color: 'text-yellow-400', text: '⚡ M8 夜盤大跌，但公股持續買超，預計明日有護盤行為。' };
+          else if (m8.status === 'red' && data.status === 'red')
+            crossRef = { color: 'text-red-400', text: '🔴 M8 夜盤同步看空，無公股護盤緩衝，市場壓力倍增。' };
+          else if (m8.status === 'green' && data.status === 'green')
+            crossRef = { color: 'text-green-400', text: '✅ M8 夜盤同步看多，期貨情緒與公股籌碼共振，多方信心增強。' };
+        }
+      }
 
       return (
         <div className="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-lg flex flex-col h-full">
@@ -366,7 +405,12 @@
           </div>
 
           {!loading && !error && data && (
-            <div className="mt-4 text-gray-300 text-sm leading-relaxed flex-grow">{data.summary}</div>
+            <div className="mt-4 text-gray-300 text-sm leading-relaxed flex-grow">
+              {data.summary}
+              {crossRef && (
+                <p className={`mt-2 text-xs ${crossRef.color} border-t border-gray-700 pt-2`}>{crossRef.text}</p>
+              )}
+            </div>
           )}
           {error && !loading && (
             <div className="mt-4 text-red-400/80 text-xs bg-red-950/30 p-2 rounded break-words">錯誤: {error}</div>
@@ -902,7 +946,16 @@
             validWeights += MODULE_CONFIG[key].weight;
           }
         });
-        return validWeights > 0 ? Math.round(totalScore / validWeights) : null;
+        if (validWeights === 0) return null;
+        let score = Math.round(totalScore / validWeights);
+        // M7 × M8 同向加權修正（±5 分）
+        const m7ok = moduleData.M7 && !moduleLoading.M7 && !moduleErrors.M7;
+        const m8ok = moduleData.M8 && !moduleLoading.M8 && !moduleErrors.M8;
+        if (m7ok && m8ok) {
+          if (moduleData.M7.status === 'green' && moduleData.M8.status === 'green') score = Math.min(100, score + 5);
+          if (moduleData.M7.status === 'red'   && moduleData.M8.status === 'red')   score = Math.max(0,   score - 5);
+        }
+        return score;
       };
 
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
@@ -1031,6 +1084,7 @@
                   error={moduleErrors[key]}
                   isExpanded={expandedCards[key]}
                   onToggle={() => setExpandedCards(prev => ({...prev, [key]: !prev[key]}))}
+                  allModuleData={moduleData}
                 />
               ))}
             </div>
