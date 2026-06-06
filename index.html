@@ -616,7 +616,7 @@
               status,
               summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
               chartTitle: '外資近 30 日大盤買賣超 (億元)',
-              renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#22c55e' : '#ef4444'} />,
+              renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M3:false})); }
@@ -729,7 +729,7 @@
               status: m4Status,
               summary: `大盤今日成交量約 ${Math.round(last.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
               chartTitle: '加權指數成交量 (億)',
-              renderChart: () => <SvgBarChart data={td.slice(-30)} dataKey="volume" colorFn={d => d.close > d.open ? '#22c55e' : '#ef4444'} />,
+              renderChart: () => <SvgBarChart data={td.slice(-30)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
             }}));
 
             const over60  = last.close > last.sma60;
@@ -858,7 +858,7 @@
                 <SvgBarChart
                   data={series.slice(-60)}
                   dataKey="total"
-                  colorFn={d => d.total > 0 ? '#22c55e' : '#ef4444'}
+                  colorFn={d => d.total > 0 ? '#ef4444' : '#22c55e'}
                   height={100}
                 />
               ),
@@ -938,7 +938,7 @@
                 <SvgBarChart
                   data={chartData}
                   dataKey="value"
-                  colorFn={d => d.value > 0 ? '#22c55e' : '#ef4444'}
+                  colorFn={d => d.value > 0 ? '#ef4444' : '#22c55e'}
                   height={100}
                 />
               ),
