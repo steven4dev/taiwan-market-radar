@@ -197,6 +197,116 @@
       );
     };
 
+    // ==========================================
+    // 對齊圖表面板（共用 x 軸）
+    // ==========================================
+    const AlignedChartPanel = ({ moduleData }) => {
+      const { useMemo } = React;
+
+      // 收集所有模組的 alignedData，取日期聯集後排序，預設最多 60 個交易日
+      const allDates = useMemo(() => {
+        const s = new Set();
+        Object.values(moduleData).forEach(d => {
+          if (d?.alignedData) d.alignedData.forEach(p => s.add(p.date));
+        });
+        return [...s].sort().slice(-60);
+      }, [moduleData]);
+
+      if (allDates.length < 2) return (
+        <p className="text-gray-500 text-sm text-center py-4">等待各模組資料載入中...</p>
+      );
+
+      const rows = [
+        { id:'M1', label:'M1 大盤',  type:'line', color:'#e5e7eb' },
+        { id:'M3', label:'M3 外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
+        { id:'M5', label:'M5 量能',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
+        { id:'M7', label:'M7 外部',  type:'line', color:'#38bdf8' },
+        { id:'M8', label:'M8 公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
+        { id:'M9', label:'M9 夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e' },
+      ];
+
+      const W = 1000, ROW_H = 44, n = allDates.length;
+      const dx = W / n;
+      const barW = dx * 0.75;
+
+      // 每隔幾格顯示一個日期 label
+      const labelStep = Math.ceil(n / 8);
+      const labelDates = allDates.filter((_, i) => i % labelStep === 0 || i === n - 1);
+
+      return (
+        <section className="mb-8 bg-gray-800 rounded-2xl p-5 border border-gray-700 shadow-xl">
+          <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+            <span>📐</span> 多模組對齊圖表
+            <span className="text-xs font-normal text-gray-400 ml-1">（近 {n} 個交易日，同一 x 軸）</span>
+          </h2>
+
+          <div className="flex flex-col gap-1">
+            {rows.map(row => {
+              const ad = moduleData[row.id]?.alignedData;
+              if (!ad || ad.length === 0) return null;
+              const byDate = Object.fromEntries(ad.map(p => [p.date, p.value]));
+              const vals = ad.map(p => p.value).filter(v => v != null && isFinite(v));
+              if (vals.length === 0) return null;
+
+              const maxAbs = row.type === 'bar'
+                ? (Math.max(...vals.map(v => Math.abs(v))) * 1.1 || 1)
+                : null;
+              const lineMin = row.type === 'line' ? Math.min(...vals) : null;
+              const lineMax = row.type === 'line' ? Math.max(...vals) : null;
+              const lineRange = lineMax != null ? (lineMax - lineMin || lineMin * 0.01 || 1) : null;
+
+              return (
+                <div key={row.id} className="flex items-center gap-2">
+                  <div className="text-xs text-gray-400 w-16 text-right flex-shrink-0 select-none">{row.label}</div>
+                  <div className="flex-1 relative rounded overflow-hidden bg-gray-900/40" style={{height: ROW_H}}>
+                    <svg viewBox={`0 0 ${W} ${ROW_H}`} className="w-full h-full" preserveAspectRatio="none">
+                      {/* 中心線（bar）或底線（line） */}
+                      {row.type === 'bar'
+                        ? <line x1="0" y1={ROW_H/2} x2={W} y2={ROW_H/2} stroke="#374151" strokeWidth="0.8" />
+                        : <line x1="0" y1={ROW_H-2} x2={W} y2={ROW_H-2} stroke="#374151" strokeWidth="0.5" />
+                      }
+                      {row.type === 'bar'
+                        ? allDates.map((date, i) => {
+                            const v = byDate[date];
+                            if (v == null) return null;
+                            const barH = Math.max(1, Math.abs(v / maxAbs) * (ROW_H/2 - 2));
+                            const x = i * dx + dx * 0.125;
+                            const y = v >= 0 ? ROW_H/2 - barH : ROW_H/2;
+                            return <rect key={date} x={x} y={y} width={barW} height={barH} fill={row.colorFn(v)} opacity="0.9" />;
+                          })
+                        : (() => {
+                            let path = '';
+                            allDates.forEach((date, i) => {
+                              const v = byDate[date];
+                              if (v == null) return;
+                              const x = i * dx + dx / 2;
+                              const y = ROW_H - 2 - ((v - lineMin) / lineRange) * (ROW_H - 6);
+                              path += path === '' ? `M ${x} ${y}` : ` L ${x} ${y}`;
+                            });
+                            return <path d={path} fill="none" stroke={row.color} strokeWidth="1.8" strokeLinejoin="round" />;
+                          })()
+                      }
+                    </svg>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* X 軸日期 */}
+            <div className="flex ml-[4.5rem] mt-1 relative" style={{height:'14px'}}>
+              <svg viewBox={`0 0 ${W} 14`} className="w-full h-full" preserveAspectRatio="none">
+                {labelDates.map(date => {
+                  const i = allDates.indexOf(date);
+                  const x = i * dx + dx / 2;
+                  return <text key={date} x={x} y="10" textAnchor="middle" fontSize="28" fill="#6b7280">{date.slice(5)}</text>;
+                })}
+              </svg>
+            </div>
+          </div>
+        </section>
+      );
+    };
+
     const TrafficLight = ({ status }) => {
       const colors = {
         green:  'background-color:#ef4444;box-shadow:0 0 10px rgba(239,68,68,0.8)',
@@ -460,6 +570,7 @@
       const [moduleErrors, setModuleErrors] = useState({});
       const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true });
       const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false });
+      const [showAligned, setShowAligned] = useState(false);
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
@@ -517,6 +628,7 @@
 
             setModuleData(prev => ({...prev, M1: {
               status,
+              alignedData: taiexData.slice(-60).map(d => ({ date: d.date, value: d.close })),
               summary: `自動偵測分水嶺：${KEY_DATE} 收盤低點 ${KEY_LOW.toLocaleString()}。當前大盤 ${current.close.toLocaleString()}，${isAbove ? '✅ 站上' : '❌ 跌破'}分水嶺 ${diff > 0 ? '+' : ''}${Math.round(diff)}（${diffPct}%）。`,
               chartTitle: `加權指數 vs 自動分水嶺 ${KEY_LOW.toLocaleString()}（紅線）`,
               legend: (
@@ -614,6 +726,7 @@
 
             setModuleData(prev => ({...prev, M3: {
               status,
+              alignedData: chartData.map(d => ({ date: d.date, value: d.netBuy })),
               summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
               chartTitle: '外資近 30 日大盤買賣超 (億元)',
               renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} />,
@@ -727,6 +840,7 @@
 
             setModuleData(p => ({...p, M5: {
               status: m4Status,
+              alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.volume })),
               summary: `大盤今日成交量約 ${Math.round(last.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
               chartTitle: '加權指數成交量 (億)',
               renderChart: () => <SvgBarChart data={td.slice(-30)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
@@ -778,6 +892,7 @@
 
             setModuleData(prev => ({...prev, M7: {
               status,
+              alignedData: soxData.slice(-60).map(d => ({ date: d.date, value: d.close })),
               summary: `${displayName} 近 5 日漲跌幅為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
               chartTitle: `${displayName} 走勢 (近3個月)`,
               renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
@@ -852,6 +967,7 @@
 
             setModuleData(prev => ({...prev, M8: {
               status,
+              alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.total / 10000 })),
               summary: `八大公股銀行近5日合計 ${fmt(sum5)}（萬元）。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
               chartTitle: '八大公股銀行每日買賣超合計 (萬元，近60日)',
               renderChart: () => (
@@ -932,6 +1048,7 @@
 
             setModuleData(prev => ({...prev, M9: {
               status,
+              alignedData: chartData,
               summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? (latest.spread_per >= 2 ? `單日大漲 ${latest.spread_per.toFixed(1)}%，夜盤強勢看多。` : '夜盤偏多，市場情緒樂觀。') : status === 'red' ? (latest.spread_per <= -2 ? `單日大跌 ${latest.spread_per.toFixed(1)}%，夜盤顯著看空，明日開盤留意風險。` : '夜盤連續偏空，市場情緒謹慎。') : '夜盤方向混合，觀望為宜。'}`,
               chartTitle: '台指期夜盤漲跌幅（近20日，%）',
               renderChart: () => (
@@ -1080,8 +1197,14 @@
             {/* 下車警示 */}
             <ExitSignalBlock score={score} moduleData={moduleData} revData={revData} />
 
-            {/* 全部展開/收折 */}
-            <div className="flex justify-end mb-4">
+            {/* 全部展開/收折 + 對齊圖表 */}
+            <div className="flex justify-end gap-2 mb-4">
+              <button
+                onClick={() => setShowAligned(v => !v)}
+                className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm transition-colors ${showAligned ? 'bg-indigo-700 border-indigo-500 text-white' : 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-300'}`}
+              >
+                📐 {showAligned ? '隱藏對齊圖表' : '對齊圖表'}
+              </button>
               <button
                 onClick={handleToggleAll}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-300 transition-colors"
@@ -1107,6 +1230,9 @@
                 />
               ))}
             </div>
+
+            {/* 對齊圖表面板 */}
+            {showAligned && <AlignedChartPanel moduleData={moduleData} />}
 
             {/* 錯誤提示 */}
             {Object.values(moduleErrors).some(Boolean) && (
