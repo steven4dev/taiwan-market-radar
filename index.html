@@ -231,10 +231,10 @@
       const ROWS_DEF = [
         { id:'M1', label:'大盤',  type:'line', color:'#e5e7eb', fmt: v => v != null ? v.toLocaleString() : '—' },
         { id:'M7', label:'外部↑1', type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
+        { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
         { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
-        { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
       ];
 
       // 只保留有資料的列
@@ -993,7 +993,12 @@
 
             setModuleData(prev => ({...prev, M7: {
               status,
-              alignedData: (() => { const s = soxData.slice(-61); return s.slice(0,-1).map((d,i) => ({ date: s[i+1].date, value: d.close })); })(),
+              alignedData: (() => {
+                const s = soxData.slice(-61);
+                const nextTD = str => { const d = new Date(str); d.setDate(d.getDate() + (d.getDay()===5?3:d.getDay()===6?2:1)); return d.toISOString().slice(0,10); };
+                return s.slice(0,-1).map((d,i) => ({ date: s[i+1].date, value: d.close }))
+                  .concat([{ date: nextTD(s[s.length-1].date), value: s[s.length-1].close }]);
+              })(),
               summary: `${displayName} 近 5 日漲跌幅為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
               chartTitle: `${displayName} 走勢 (近3個月)`,
               renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
