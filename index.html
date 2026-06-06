@@ -213,7 +213,18 @@
         return [...s].sort().slice(-60);
       }, [moduleData]);
 
-      if (allDates.length < 2) return (
+      const n = allDates.length;
+
+      // ⚠️ useCallback 必須在所有 return 之前，不可在 early return 後呼叫
+      const handleMouseMove = useCallback(e => {
+        if (!chartRef.current || n < 2) return;
+        const rect = chartRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const idx = Math.min(n - 1, Math.max(0, Math.floor((x / rect.width) * n)));
+        setHovIdx(idx);
+      }, [n]);
+
+      if (n < 2) return (
         <p className="text-gray-500 text-sm text-center py-4">等待各模組資料載入中...</p>
       );
 
@@ -240,7 +251,6 @@
         return { ...r, byDate, vals, maxAbs, lineMin, lineMax, lineRange };
       }).filter(Boolean);
 
-      const n = allDates.length;
       const W = 1000;           // SVG viewBox 寬
       const ROW_H = 52;         // 每列高（SVG 單位）
       const X_H = 22;           // x 軸高
@@ -248,15 +258,6 @@
       const dx = W / n;
       const barW = dx * 0.72;
       const labelStep = Math.ceil(n / 8);
-
-      // 游標位置 → 日期索引
-      const handleMouseMove = useCallback(e => {
-        if (!chartRef.current) return;
-        const rect = chartRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const idx = Math.min(n - 1, Math.max(0, Math.floor((x / rect.width) * n)));
-        setHovIdx(idx);
-      }, [n]);
 
       const hovDate = hovIdx != null ? allDates[hovIdx] : null;
 
