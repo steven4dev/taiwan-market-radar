@@ -827,7 +827,7 @@
 
             setModuleData(prev => ({...prev, M3: {
               status,
-              alignedData: chartData.map(d => ({ date: d.date, value: d.netBuy })),
+              alignedData: sortedDates.slice(-60).map(date => ({ date, value: byDate[date] })),
               summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
               chartTitle: '外資近 30 日大盤買賣超 (億元)',
               renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} />,
@@ -1149,7 +1149,7 @@
 
             setModuleData(prev => ({...prev, M9: {
               status,
-              alignedData: chartData,
+              alignedData: afterMkt.slice(-60).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) })),
               summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? (latest.spread_per >= 2 ? `單日大漲 ${latest.spread_per.toFixed(1)}%，夜盤強勢看多。` : '夜盤偏多，市場情緒樂觀。') : status === 'red' ? (latest.spread_per <= -2 ? `單日大跌 ${latest.spread_per.toFixed(1)}%，夜盤顯著看空，明日開盤留意風險。` : '夜盤連續偏空，市場情緒謹慎。') : '夜盤方向混合，觀望為宜。'}`,
               chartTitle: '台指期夜盤漲跌幅（近20日，%）',
               renderChart: () => (
