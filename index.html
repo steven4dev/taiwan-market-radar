@@ -855,9 +855,11 @@
             const basisPct = latestDay ? ((basis / latestDay.close) * 100).toFixed(2) : null;
 
             // 狀態判斷
+            // 單日暴跌 ≥ 2% 或連續空方 ≥ 2 天且最新也是空 → 紅燈
+            // 單日暴漲 ≥ 2% 或連續多方 ≥ 3 天且最新也是多 → 綠燈
             let status = 'yellow';
-            if (bullDays >= 3 && latest.spread_per > 0) status = 'green';
-            if (bearDays >= 3 && latest.spread_per < 0) status = 'red';
+            if (latest.spread_per >= 2 || (bullDays >= 3 && latest.spread_per > 0)) status = 'green';
+            if (latest.spread_per <= -2 || (bearDays >= 2 && latest.spread_per < 0)) status = 'red';
 
             // 圖表資料：近20日夜盤漲跌幅
             const chartData = afterMkt.slice(-20).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) }));
@@ -867,7 +869,7 @@
 
             setModuleData(prev => ({...prev, M8: {
               status,
-              summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? '夜盤偏多，市場情緒樂觀。' : status === 'red' ? '夜盤偏空，市場情緒謹慎。' : '夜盤方向混合，觀望為宜。'}`,
+              summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? (latest.spread_per >= 2 ? `單日大漲 ${latest.spread_per.toFixed(1)}%，夜盤強勢看多。` : '夜盤偏多，市場情緒樂觀。') : status === 'red' ? (latest.spread_per <= -2 ? `單日大跌 ${latest.spread_per.toFixed(1)}%，夜盤顯著看空，明日開盤留意風險。` : '夜盤連續偏空，市場情緒謹慎。') : '夜盤方向混合，觀望為宜。'}`,
               chartTitle: '台指期夜盤漲跌幅（近20日，%）',
               renderChart: () => (
                 <SvgBarChart
