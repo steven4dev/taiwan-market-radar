@@ -52,6 +52,7 @@
       CheckCircle2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"m9 12 2 2 4-4"]} />,
       Milestone: ({ size, className }) => <Icon size={size} className={className} d={["M12 13V2l8 4-8 4",{tag:'path',d:"M20.55 10.23A9 9 0 1 1 8 4.94"},"M8 10a5 5 0 1 0 8.9 2.02"]} />,
       Building2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'rect',width:'16',height:'20',x:'4',y:'2',rx:'2',ry:'2'},"M9 22v-4h6v4","M8 6h.01","M16 6h.01","M12 6h.01","M12 10h.01","M8 10h.01","M16 10h.01","M12 14h.01","M8 14h.01","M16 14h.01"]} />,
+      Moon: ({ size, className }) => <Icon size={size} className={className} d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
     };
 
     // ==========================================
@@ -60,14 +61,15 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     const MODULE_CONFIG = {
-      M0: { weight: 0.18, title: '多空分水嶺',   icon: 'Milestone' },
-      M1: { weight: 0.18, title: '權值股健康度', icon: 'Activity' },
-      M2: { weight: 0.18, title: '法人動向',     icon: 'Users' },
-      M3: { weight: 0.11, title: '籌碼面',       icon: 'PieChart' },
-      M4: { weight: 0.07, title: '量能結構',     icon: 'BarChart2' },
-      M5: { weight: 0.11, title: '技術面',       icon: 'TrendingUp' },
-      M6: { weight: 0.07, title: '外部環境',     icon: 'Globe' },
-      M7: { weight: 0.10, title: '公股銀行動向', icon: 'Building2' },
+      M0: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
+      M1: { weight: 0.16, title: '權值股健康度', icon: 'Activity' },
+      M2: { weight: 0.16, title: '法人動向',     icon: 'Users' },
+      M3: { weight: 0.10, title: '籌碼面',       icon: 'PieChart' },
+      M4: { weight: 0.06, title: '量能結構',     icon: 'BarChart2' },
+      M5: { weight: 0.10, title: '技術面',       icon: 'TrendingUp' },
+      M6: { weight: 0.06, title: '外部環境',     icon: 'Globe' },
+      M7: { weight: 0.08, title: '公股銀行動向', icon: 'Building2' },
+      M8: { weight: 0.12, title: '夜盤動向',     icon: 'Moon' },
     };
 
     const SCORE_LABELS = [
@@ -391,17 +393,17 @@
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [revData, setRevData] = useState(null);
-      const [moduleData, setModuleData] = useState({ M0:null, M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null });
+      const [moduleData, setModuleData] = useState({ M0:null, M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null });
       const [moduleErrors, setModuleErrors] = useState({});
-      const [moduleLoading, setModuleLoading] = useState({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true });
-      const [expandedCards, setExpandedCards] = useState({ M0:false, M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false });
+      const [moduleLoading, setModuleLoading] = useState({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true });
+      const [expandedCards, setExpandedCards] = useState({ M0:false, M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false });
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
       const fetchAllData = async () => {
         setIsRefreshing(true);
         setModuleErrors({});
-        setModuleLoading({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true });
+        setModuleLoading({ M0:true, M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true });
 
         const startDate  = getPastDateString(8);
         const recentDate = getPastDateString(3);
@@ -821,7 +823,66 @@
           } catch(e) { console.warn('[Revenue]', e.message); }
         };
 
-        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processRevenue()]);
+        // M8 夜盤動向（台指期 after_market session）
+        const processM8 = async () => {
+          try {
+            const raw = await fetchFinMind('TaiwanFuturesDaily', 'TX', token, getPastDateString(10));
+            if (!raw || raw.length === 0) throw new Error('台指期資料不足');
+
+            // 取近月合約（contract_date 最近且大於今日）
+            const today = new Date().toISOString().slice(0,7).replace('-','');
+            const contracts = [...new Set(raw.map(d => d.contract_date))].sort();
+            const nearContract = contracts.find(c => c >= today) || contracts[contracts.length - 1];
+
+            // 夜盤 & 日盤資料（近月）
+            const afterMkt = raw.filter(d => d.trading_session === 'after_market' && d.contract_date === nearContract)
+              .sort((a,b) => a.date.localeCompare(b.date));
+            const dayMkt   = raw.filter(d => d.trading_session !== 'after_market' && d.contract_date === nearContract)
+              .sort((a,b) => a.date.localeCompare(b.date));
+
+            if (afterMkt.length < 3) throw new Error('夜盤資料筆數不足');
+
+            // 近5日夜盤漲跌幅
+            const recent5 = afterMkt.slice(-5);
+            const bullDays = recent5.filter(d => d.spread_per > 0).length;
+            const bearDays = recent5.filter(d => d.spread_per < 0).length;
+
+            const latest = afterMkt[afterMkt.length - 1];
+            const latestDay = dayMkt[dayMkt.length - 1];
+
+            // 期現貨差（basis）：夜盤最新收盤 vs 日盤最新收盤
+            const basis = latestDay ? latest.close - latestDay.close : null;
+            const basisPct = latestDay ? ((basis / latestDay.close) * 100).toFixed(2) : null;
+
+            // 狀態判斷
+            let status = 'yellow';
+            if (bullDays >= 3 && latest.spread_per > 0) status = 'green';
+            if (bearDays >= 3 && latest.spread_per < 0) status = 'red';
+
+            // 圖表資料：近20日夜盤漲跌幅
+            const chartData = afterMkt.slice(-20).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) }));
+
+            const dirStr = latest.spread_per > 0 ? `上漲 +${latest.spread_per.toFixed(2)}%` : `下跌 ${latest.spread_per.toFixed(2)}%`;
+            const basisStr = basis !== null ? `，期現差 ${basis > 0 ? '+' : ''}${Math.round(basis)} 點 (${basisPct}%)` : '';
+
+            setModuleData(prev => ({...prev, M8: {
+              status,
+              summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? '夜盤偏多，市場情緒樂觀。' : status === 'red' ? '夜盤偏空，市場情緒謹慎。' : '夜盤方向混合，觀望為宜。'}`,
+              chartTitle: '台指期夜盤漲跌幅（近20日，%）',
+              renderChart: () => (
+                <SvgBarChart
+                  data={chartData}
+                  dataKey="value"
+                  colorFn={d => d.value > 0 ? '#22c55e' : '#ef4444'}
+                  height={100}
+                />
+              ),
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M8:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M8:false})); }
+        };
+
+        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processRevenue()]);
 
         const now = new Date();
         setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
@@ -845,7 +906,7 @@
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
       const handleToggleAll = () => {
         const v = !isAllExpanded;
-        setExpandedCards({ M0:v, M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v });
+        setExpandedCards({ M0:v, M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v });
       };
 
       const score = calculateScore();
