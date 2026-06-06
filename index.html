@@ -230,10 +230,10 @@
 
       const ROWS_DEF = [
         { id:'M1', label:'大盤',  type:'line', color:'#e5e7eb', fmt: v => v != null ? v.toLocaleString() : '—' },
-        { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
-        { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
         { id:'M7', label:'外部',  type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
+        { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
+        { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
         { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
       ];
 
