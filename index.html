@@ -748,10 +748,13 @@
             if (!raw || raw.length === 0) throw new Error('公股銀行資料尚未建立。請前往 update-bank.html 依指示更新一次。');
 
             // 由新到舊排序，計算每日合計
+            // 支援兩種格式：{date, total} 精簡版 或 {date, bot:{amount}, ...} 原始版
             const series = raw
               .map(d => {
-                const total = Object.keys(BANKS).reduce((s, k) => s + (d[k]?.amount || 0), 0);
-                return { date: d.date.slice(0, 10), total: Math.round(total) };
+                const total = d.total !== undefined
+                  ? d.total
+                  : Math.round(Object.keys(BANKS).reduce((s, k) => s + (d[k]?.amount || 0), 0));
+                return { date: d.date.slice(0, 10), total };
               })
               .sort((a, b) => a.date.localeCompare(b.date));
 
