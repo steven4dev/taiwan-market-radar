@@ -1333,7 +1333,7 @@
             </div>
 
             {/* 對齊圖表面板 */}
-            {showAligned && <AlignedChartPanel moduleData={moduleData} />}
+            {showAligned && <div className="mt-8"><AlignedChartPanel moduleData={moduleData} /></div>}
 
             {/* 錯誤提示 */}
             {Object.values(moduleErrors).some(Boolean) && (
