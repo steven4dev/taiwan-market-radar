@@ -599,7 +599,7 @@
             const byDate = {};
             foreignData.forEach(d => {
               if (!byDate[d.date]) byDate[d.date] = 0;
-              byDate[d.date] += (Number(d.buy)||0 - (Number(d.sell)||0)) / 1e8;
+              byDate[d.date] += ((Number(d.buy)||0) - (Number(d.sell)||0)) / 1e8;
             });
             const sortedDates = Object.keys(byDate).sort();
             if (!sortedDates.length) throw new Error('找不到外資買賣超資料');
