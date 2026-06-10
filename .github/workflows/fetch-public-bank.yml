@@ -16,64 +16,105 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Playwright + Stealth
-        run: |
-          npm install playwright playwright-extra puppeteer-extra-plugin-stealth
-          npx playwright install chromium --with-deps
-
-      - name: Fetch 八大公股銀行資料（Playwright）
+      - name: Fetch 八大公股券商資料（TWSE TWT49U）
         run: |
           node << 'EOF'
-          const { chromium } = require('playwright-extra');
-          const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-          chromium.use(StealthPlugin());
+          const https = require('https');
           const fs = require('fs');
 
+          function httpsGet(url) {
+            return new Promise((resolve, reject) => {
+              const req = https.get(url, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  'Referer': 'https://www.twse.com.tw/',
+                  'Accept': 'application/json, */*',
+                }
+              }, res => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => {
+                  try { resolve(JSON.parse(data)); }
+                  catch(e) { resolve(null); }
+                });
+              });
+              req.on('error', reject);
+              req.setTimeout(15000, () => { req.destroy(); reject(new Error('timeout')); });
+            });
+          }
+
+          function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+          // 產生近 6 個月的月份清單（格式 YYYYMM01）
+          function getMonths(n) {
+            const months = [];
+            const now = new Date();
+            for (let i = 0; i < n; i++) {
+              const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, '0');
+              months.unshift(`${y}${m}01`);
+            }
+            return months;
+          }
+
           (async () => {
-            const browser = await chromium.launch({
-              headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-            });
+            const months = getMonths(6);
+            console.log('Fetching months:', months);
 
-            const context = await browser.newContext({
-              userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-              locale: 'zh-TW',
-              viewport: { width: 1280, height: 800 },
-            });
+            const byDate = {};
 
-            const page = await context.newPage();
+            for (const dateStr of months) {
+              const url = `https://www.twse.com.tw/rwd/zh/fund/TWT49U?response=json&date=${dateStr}`;
+              console.log(`Fetching ${url}`);
+              try {
+                const json = await httpsGet(url);
+                if (!json || json.stat !== 'OK') {
+                  console.warn(`  Skip ${dateStr}: stat=${json?.stat}`);
+                  await sleep(500);
+                  continue;
+                }
 
-            // 先設好等待 trend-data 回應（在 goto 之前，避免錯過）
-            const responsePromise = page.waitForResponse(
-              r => r.url().includes('trend-data') && r.status() === 200,
-              { timeout: 90000 }
-            );
+                // fields 示例: ['日期','股票代號','股票名稱','買進','賣出','買賣超']
+                const fields = json.fields || [];
+                const buyIdx  = fields.findIndex(f => f.includes('買進'));
+                const sellIdx = fields.findIndex(f => f.includes('賣出'));
+                const netIdx  = fields.findIndex(f => f.includes('買賣超'));
+                const dateIdx = 0;
 
-            console.log('Navigating to wantgoo...');
-            await page.goto('https://www.wantgoo.com/stock/public-bank/trend', {
-              waitUntil: 'load',
-              timeout: 90000,
-            });
+                (json.data || []).forEach(row => {
+                  // TWSE 日期格式：民國年/月/日 → 轉成西元
+                  const rawDate = row[dateIdx]; // e.g. "115/06/09"
+                  const parts = rawDate.split('/');
+                  if (parts.length !== 3) return;
+                  const isoDate = `${parseInt(parts[0]) + 1911}-${parts[1]}-${parts[2]}`;
 
-            console.log('Waiting for trend-data API response...');
-            const apiResponse = await responsePromise;
-            const bankData = await apiResponse.json();
-            console.log(`API response received: ${bankData.length} records`);
+                  const net = netIdx >= 0
+                    ? parseInt((row[netIdx] || '0').replace(/,/g, '')) || 0
+                    : (parseInt((row[buyIdx] || '0').replace(/,/g, '')) || 0)
+                      - (parseInt((row[sellIdx] || '0').replace(/,/g, '')) || 0);
 
-            if (!Array.isArray(bankData) || bankData.length === 0) {
-              throw new Error('Invalid data: ' + JSON.stringify(bankData).slice(0, 100));
+                  byDate[isoDate] = (byDate[isoDate] || 0) + net;
+                });
+
+                console.log(`  OK: ${(json.data || []).length} rows`);
+              } catch(e) {
+                console.warn(`  Error ${dateStr}: ${e.message}`);
+              }
+              await sleep(300); // 避免過快請求
+            }
+
+            const series = Object.entries(byDate)
+              .map(([date, total]) => ({ date, total }))
+              .sort((a, b) => a.date.localeCompare(b.date));
+
+            if (series.length === 0) {
+              throw new Error('No data fetched from TWSE');
             }
 
             fs.mkdirSync('data', { recursive: true });
-            fs.writeFileSync('data/public-bank.json', JSON.stringify(bankData));
-            console.log(`OK: ${bankData.length} records, latest: ${bankData[0].date.slice(0,10)}`);
-
-            await browser.close();
+            fs.writeFileSync('data/public-bank.json', JSON.stringify(series));
+            console.log(`Saved ${series.length} records, latest: ${series[series.length-1].date}`);
           })().catch(err => { console.error(err); process.exit(1); });
           EOF
 
