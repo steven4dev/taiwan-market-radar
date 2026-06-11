@@ -429,6 +429,29 @@
     // ==========================================
     // 3. API 抓取邏輯
     // ==========================================
+    // 載入快取 JSON + 只抓增量 delta
+    const loadWithDelta = async (cacheUrl, fetchDelta) => {
+      let cached = [];
+      try {
+        const res = await fetch(cacheUrl);
+        if (res.ok) cached = await res.json();
+      } catch(e) {}
+      const latest = cached.length
+        ? cached.reduce((m, r) => r.date > m ? r.date : m, cached[0].date)
+        : null;
+      const todayStr = new Date().toISOString().slice(0, 10);
+      if (latest && latest >= todayStr) return cached;
+      const deltaStart = latest
+        ? (() => { const d = new Date(latest); d.setDate(d.getDate() + 1); return d.toISOString().slice(0,10); })()
+        : null;
+      let delta = [];
+      try { delta = await fetchDelta(deltaStart) || []; } catch(e) {}
+      if (!delta.length) return cached;
+      const existDates = new Set(cached.map(r => r.date));
+      return [...cached, ...delta.filter(r => !existDates.has(r.date))]
+        .sort((a, b) => a.date.localeCompare(b.date));
+    };
+
     const fetchFinMind = async (dataset, dataId, token, startDate) => {
       let url = `https://api.finmindtrade.com/api/v4/data?dataset=${dataset}&start_date=${startDate}`;
       if (dataId) url += `&data_id=${dataId}`;
@@ -687,7 +710,9 @@
         // M0 多空分水嶺（自動偵測關鍵擺盪低點）
         const processM0 = async () => {
           try {
-            const raw = await fetchFinMind('TaiwanStockPrice', 'TAIEX', token, getPastDateString(5));
+            const raw = await loadWithDelta('./data/taiex.json',
+              start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || getPastDateString(5))
+                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, volume: d.Trading_Volume }))));
             const taiexData = raw.map(d => ({ date: d.date, close: d.close, open: d.open }));
             if (taiexData.length < 20) throw new Error('TAIEX 資料不足以判斷分水嶺');
 
@@ -804,10 +829,12 @@
         // M3
         const processM2 = async () => {
           try {
-            const data = await fetchFinMindFallback([
-              { dataset:'TaiwanStockTotalInstitutionalInvestors', dataId:'' },
-              { dataset:'TaiwanStockInstitutionalInvestors', dataId:'TAIEX' },
-            ], token, recentDate);
+            const data = await loadWithDelta('./data/institutional.json',
+              start => fetchFinMindFallback([
+                { dataset:'TaiwanStockTotalInstitutionalInvestors', dataId:'' },
+                { dataset:'TaiwanStockInstitutionalInvestors', dataId:'TAIEX' },
+              ], token, start || recentDate)
+                .then(r => r.map(d => ({ date: d.date, name: d.name, buy: d.buy, sell: d.sell }))));
 
             const foreignData = data.filter(d => d.name && (d.name.includes('外資') || d.name.includes('Foreign_Investor')));
             const byDate = {};
@@ -924,8 +951,10 @@
         // M4 + M6
         const processM4M5 = async () => {
           try {
-            const raw = await fetchFinMind('TaiwanStockPrice', 'TAIEX', token, startDate);
-            const fmt = raw.map(d => ({ date:d.date, close:d.close, volume:d.Trading_Volume/1e8, open:d.open }));
+            const raw = await loadWithDelta('./data/taiex.json',
+              start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || startDate)
+                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, volume: d.Trading_Volume }))));
+            const fmt = raw.map(d => ({ date:d.date, close:d.close, volume:(d.volume||d.Trading_Volume||0)/1e8, open:d.open }));
             let td = calculateSMA(fmt, 60);
             td = calculateSMA(td, 120);
             td = calculateSMA(td, 10, 'volume');
@@ -1112,7 +1141,12 @@
         // M9 夜盤動向（台指期 after_market session）
         const processM8 = async () => {
           try {
-            const raw = await fetchFinMind('TaiwanFuturesDaily', 'TX', token, getPastDateString(10));
+            const raw = await loadWithDelta('./data/futures.json',
+              start => fetchFinMind('TaiwanFuturesDaily', 'TX', token, start || getPastDateString(10))
+                .then(r => r.map(d => ({
+                  date: d.date, trading_session: d.trading_session,
+                  contract_date: d.contract_date, close: d.close, spread_per: d.spread_per,
+                }))));
             if (!raw || raw.length === 0) throw new Error('台指期資料不足');
 
             // 取近月合約（contract_date 最近且大於今日）

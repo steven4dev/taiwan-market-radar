@@ -1,0 +1,218 @@
+name: 每日增量更新所有資料
+
+on:
+  schedule:
+    # 台灣時間 19:00（UTC 11:00），週一至週五盤後執行
+    - cron: '0 11 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Update all data files
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          node << 'SCRIPT'
+          const https = require('https');
+          const fs   = require('fs');
+
+          const TOKEN = process.env.FINMIND_TOKEN || '';
+
+          // ── 工具函式 ──────────────────────────────────────────────
+          function get(url) {
+            return new Promise((resolve, reject) => {
+              const req = https.get(url, {
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+              }, res => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
+              });
+              req.on('error', reject);
+              req.setTimeout(30000, () => { req.destroy(); reject(new Error('timeout')); });
+            });
+          }
+
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+          function readJSON(path, fallback = []) {
+            try { return JSON.parse(fs.readFileSync(path, 'utf8')); }
+            catch { return fallback; }
+          }
+
+          function writeJSON(path, data) {
+            fs.mkdirSync('data', { recursive: true });
+            fs.writeFileSync(path, JSON.stringify(data));
+          }
+
+          function latestDate(records) {
+            if (!records.length) return null;
+            return records.reduce((max, r) => r.date > max ? r.date : max, records[0].date);
+          }
+
+          function nextDay(dateStr) {
+            const d = new Date(dateStr);
+            d.setDate(d.getDate() + 1);
+            return d.toISOString().slice(0, 10);
+          }
+
+          const today = new Date().toISOString().slice(0, 10);
+
+          async function fetchFinMind(dataset, dataId, startDate) {
+            let url = `https://api.finmindtrade.com/api/v4/data?dataset=${dataset}&start_date=${startDate}`;
+            if (dataId) url += `&data_id=${dataId}`;
+            if (TOKEN)  url += `&token=${TOKEN}`;
+            const json = await get(url);
+            if (!json || json.msg !== 'success') throw new Error(json?.msg || 'FinMind failed');
+            return json.data || [];
+          }
+
+          // ── taiex.json（M1 / M5 / M6）────────────────────────────
+          async function updateTaiex() {
+            const existing   = readJSON('data/taiex.json');
+            const latest     = latestDate(existing);
+            if (latest >= today) { console.log('taiex: up to date'); return; }
+            const startDate  = latest ? nextDay(latest) : '2023-01-01';
+            console.log(`taiex: fetching from ${startDate}`);
+            const raw        = await fetchFinMind('TaiwanStockPrice', 'TAIEX', startDate);
+            if (!raw.length) { console.log('taiex: no new data'); return; }
+            const existDates = new Set(existing.map(r => r.date));
+            const merged     = [
+              ...existing,
+              ...raw.filter(r => !existDates.has(r.date))
+                   .map(r => ({ date: r.date, close: r.close, open: r.open, volume: r.Trading_Volume }))
+            ].sort((a, b) => a.date.localeCompare(b.date));
+            writeJSON('data/taiex.json', merged);
+            console.log(`taiex: ${merged.length} records, latest: ${merged.at(-1).date}`);
+          }
+
+          // ── institutional.json（M3 外資）─────────────────────────
+          async function updateInstitutional() {
+            const existing  = readJSON('data/institutional.json');
+            const latest    = latestDate(existing);
+            if (latest >= today) { console.log('institutional: up to date'); return; }
+            const startDate = latest ? nextDay(latest) : '2023-01-01';
+            console.log(`institutional: fetching from ${startDate}`);
+            let raw = [];
+            try {
+              raw = await fetchFinMind('TaiwanStockTotalInstitutionalInvestors', '', startDate);
+            } catch {
+              try { raw = await fetchFinMind('TaiwanStockInstitutionalInvestors', 'TAIEX', startDate); }
+              catch(e) { console.warn('institutional: all sources failed:', e.message); return; }
+            }
+            if (!raw.length) { console.log('institutional: no new data'); return; }
+            const existKeys = new Set(existing.map(r => `${r.date}|${r.name}`));
+            const merged    = [
+              ...existing,
+              ...raw.filter(r => !existKeys.has(`${r.date}|${r.name}`))
+                   .map(r => ({ date: r.date, name: r.name, buy: r.buy, sell: r.sell }))
+            ].sort((a, b) => a.date.localeCompare(b.date) || (a.name||'').localeCompare(b.name||''));
+            writeJSON('data/institutional.json', merged);
+            console.log(`institutional: ${merged.length} records, latest: ${merged.at(-1).date}`);
+          }
+
+          // ── futures.json（M9 夜盤）───────────────────────────────
+          async function updateFutures() {
+            const existing  = readJSON('data/futures.json');
+            const latest    = latestDate(existing);
+            if (latest >= today) { console.log('futures: up to date'); return; }
+            const startDate = latest ? nextDay(latest) : '2023-01-01';
+            console.log(`futures: fetching from ${startDate}`);
+            const raw       = await fetchFinMind('TaiwanFuturesDaily', 'TX', startDate);
+            if (!raw.length) { console.log('futures: no new data'); return; }
+            const existKeys = new Set(existing.map(r => `${r.date}|${r.trading_session}|${r.contract_date}`));
+            const merged    = [
+              ...existing,
+              ...raw.filter(r => !existKeys.has(`${r.date}|${r.trading_session}|${r.contract_date}`))
+                   .map(r => ({
+                     date: r.date,
+                     trading_session: r.trading_session,
+                     contract_date:   r.contract_date,
+                     close:           r.close,
+                     spread_per:      r.spread_per,
+                   }))
+            ].sort((a, b) => a.date.localeCompare(b.date));
+            writeJSON('data/futures.json', merged);
+            console.log(`futures: ${merged.length} records, latest: ${merged.at(-1).date}`);
+          }
+
+          // ── public-bank.json（M8 公股）── TWSE TWT49U ────────────
+          async function updatePublicBank() {
+            const existing  = readJSON('data/public-bank.json');
+            const latest    = latestDate(existing);
+            if (latest >= today) { console.log('public-bank: up to date'); return; }
+
+            // 產生需要補抓的月份（從 latest 所在月份到本月）
+            function getMonthsFrom(fromDate) {
+              const months = [];
+              const from = fromDate ? new Date(fromDate) : new Date('2024-01-01');
+              from.setDate(1);
+              const now = new Date();
+              while (from <= now) {
+                const y = from.getFullYear();
+                const m = String(from.getMonth() + 1).padStart(2, '0');
+                months.push(`${y}${m}01`);
+                from.setMonth(from.getMonth() + 1);
+              }
+              return months;
+            }
+
+            const months = getMonthsFrom(latest);
+            console.log(`public-bank: fetching months ${months.join(', ')}`);
+            const byDate = {};
+            existing.forEach(r => { byDate[r.date] = r.total; });
+
+            for (const dateStr of months) {
+              const url = `https://www.twse.com.tw/rwd/zh/fund/TWT49U?response=json&date=${dateStr}`;
+              try {
+                const json = await get(url);
+                if (!json || json.stat !== 'OK') { console.warn(`  Skip ${dateStr}`); await sleep(400); continue; }
+                const fields  = json.fields || [];
+                const netIdx  = fields.findIndex(f => f.includes('買賣超'));
+                const dateIdx = 0;
+                (json.data || []).forEach(row => {
+                  const parts = (row[dateIdx] || '').split('/');
+                  if (parts.length !== 3) return;
+                  const isoDate = `${parseInt(parts[0]) + 1911}-${parts[1]}-${parts[2]}`;
+                  const net = parseInt((row[netIdx] || '0').replace(/,/g, '')) || 0;
+                  byDate[isoDate] = (byDate[isoDate] || 0) + net;
+                });
+                console.log(`  ${dateStr}: OK (${(json.data||[]).length} rows)`);
+              } catch(e) { console.warn(`  ${dateStr}: ${e.message}`); }
+              await sleep(300);
+            }
+
+            const series = Object.entries(byDate)
+              .map(([date, total]) => ({ date, total }))
+              .sort((a, b) => a.date.localeCompare(b.date));
+            writeJSON('data/public-bank.json', series);
+            console.log(`public-bank: ${series.length} records, latest: ${series.at(-1).date}`);
+          }
+
+          // ── 執行 ──────────────────────────────────────────────────
+          (async () => {
+            try {
+              await updateTaiex();        await sleep(500);
+              await updateInstitutional();await sleep(500);
+              await updateFutures();      await sleep(500);
+              await updatePublicBank();
+              console.log('✅ All updates complete');
+            } catch(e) { console.error('❌', e); process.exit(1); }
+          })();
+          SCRIPT
+
+      - name: Commit & Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --staged --quiet || git commit -m "data: 增量更新 $(TZ=Asia/Taipei date +'%Y-%m-%d %H:%M')"
+          git push

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "台股多空雷達",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-p", "3456", "."],
+      "port": 3456
+    }
+  ]
+}
