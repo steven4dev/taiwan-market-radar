@@ -567,15 +567,11 @@
 
       return (
         <section className={`mb-6 bg-gray-800 rounded-2xl p-6 border ${borderColor} shadow-xl`}>
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <span className="text-xl">⚠️</span> 下車警示
-            </h2>
-            <div className="flex items-center gap-2 bg-gray-900/60 px-4 py-1.5 rounded-full border border-gray-700">
-              <span className={`text-2xl font-black ${riskColor}`}>{triggeredCount}</span>
-              <span className="text-gray-400 text-sm">/ {signals.length} 訊號觸發</span>
-              <span className={`text-sm font-medium ${riskColor} ml-1`}>— {riskLabel}</span>
-            </div>
+          <div className="mb-5">
+            <h3 className="text-lg font-bold text-white">⚠️ 下車警示</h3>
+            <p className="text-sm text-gray-400 mt-1">
+              <span className={`font-bold ${riskColor}`}>{triggeredCount} / {signals.length}</span> 訊號觸發 — <span className={`font-medium ${riskColor}`}>{riskLabel}</span>
+            </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {signals.map((s, i) => (
