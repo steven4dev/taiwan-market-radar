@@ -89,7 +89,7 @@
       M5: { weight: 0.06, title: '量能結構',     icon: 'BarChart2' },
       M6: { weight: 0.10, title: '技術面',       icon: 'TrendingUp' },
       M7: { weight: 0.06, title: '外部環境',     icon: 'Globe' },
-      M8: { weight: 0.08, title: '公股銀行動向', icon: 'Building2' },
+      M8: { weight: 0.08, title: '投信動向',     icon: 'Building2' },
       M9: { weight: 0.12, title: '夜盤動向',     icon: 'Moon' },
     };
 
@@ -235,7 +235,7 @@
         { id:'M7', label:'外部↑1', type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
         { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
         { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
-        { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
+        { id:'M8', label:'投信',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
       ];
 
@@ -536,7 +536,7 @@
           ? `已跌破分水嶺，嚴守紀律停損出場`
           : `持守分水嶺以上，持倉安全`;
 
-      // Signal 5：夜盤重跌 × 公股無護盤（M8 × M9 聯合訊號）
+      // Signal 5：夜盤重跌 × 投信無買盤（M8 × M9 聯合訊號）
       const m7 = moduleData.M8;
       const m8 = moduleData.M9;
       const s5BothLoaded = m7 && m8;
@@ -546,17 +546,17 @@
         : (m8.status === 'red' && m7.status === 'green') ? 'yellow'
         : 'green';
       const s5Desc = !s5BothLoaded ? 'M8/M9 資料載入中...'
-        : s5Triggered ? `夜盤大跌且公股銀行同步看空，明日開盤風險極高`
-        : (m8.status === 'red' && m7.status === 'green') ? `夜盤偏空，但公股買超可緩衝跌幅`
-        : (m8.status === 'green' && m7.status === 'green') ? `夜盤與公股同步看多，市場信心穩固`
-        : `夜盤與公股方向混合，持續觀察`;
+        : s5Triggered ? `夜盤大跌且投信同步看空，明日開盤風險極高`
+        : (m8.status === 'red' && m7.status === 'green') ? `夜盤偏空，但投信買超可緩衝跌幅`
+        : (m8.status === 'green' && m7.status === 'green') ? `夜盤與投信同步看多，市場信心穩固`
+        : `夜盤與投信方向混合，持續觀察`;
 
       const signals = [
         { num: '①', label: '大盤情緒過熱',   desc: s1Desc, status: s1Status, triggered: s1Triggered, tip: '貪婪指數 > 50 慢慢減碼' },
         { num: '②', label: '月營收警訊',     desc: s2Desc, status: s2Status, triggered: s2Triggered, tip: '同業差/衰退/沒創新高 → 減碼' },
         { num: '③', label: '短線漲幅過高',   desc: s3Desc, status: s3Status, triggered: s3Triggered, tip: '近20日漲幅 > 15% → 先減碼' },
         { num: '④', label: '跌破股神指標',   desc: s4Desc, status: s4Status, triggered: s4Triggered, tip: '跌破分水嶺，嚴守紀律停損' },
-        { num: '⑤', label: '夜盤重跌無護盤', desc: s5Desc, status: s5Status, triggered: s5Triggered, tip: 'M9夜盤↓ + M8公股↓ → 雙重利空' },
+        { num: '⑤', label: '夜盤重跌投信空', desc: s5Desc, status: s5Status, triggered: s5Triggered, tip: 'M9夜盤↓ + M8投信↓ → 雙重利空' },
       ];
 
       const triggeredCount = signals.filter(s => s.triggered).length;
@@ -610,19 +610,19 @@
         const m8 = allModuleData?.M9;
         if (id === 'M9' && m7) {
           if (data.status === 'red' && m7.status === 'green')
-            crossRef = { color: 'text-yellow-400', text: '⚡ M8 公股銀行仍在買超，明日或有護盤介入，跌幅可能被壓縮。' };
+            crossRef = { color: 'text-yellow-400', text: '⚡ M8 投信仍在買超，市場仍有支撐，跌幅可能被壓縮。' };
           else if (data.status === 'red' && m7.status === 'red')
-            crossRef = { color: 'text-green-400', text: '🟢 M8 公股銀行同步看空，雙重利空確認，明日開盤風險顯著偏高。' };
+            crossRef = { color: 'text-green-400', text: '🟢 M8 投信同步看空，雙重利空確認，明日開盤風險顯著偏高。' };
           else if (data.status === 'green' && m7.status === 'green')
-            crossRef = { color: 'text-red-400', text: '🔴 M8 公股銀行同步看多，籌碼與夜盤情緒共振，多方訊號可信度提升。' };
+            crossRef = { color: 'text-red-400', text: '🔴 M8 投信同步看多，籌碼與夜盤情緒共振，多方訊號可信度提升。' };
         }
         if (id === 'M8' && m8) {
           if (m8.status === 'red' && data.status === 'green')
-            crossRef = { color: 'text-yellow-400', text: '⚡ M9 夜盤大跌，但公股持續買超，預計明日有護盤行為。' };
+            crossRef = { color: 'text-yellow-400', text: '⚡ M9 夜盤大跌，但投信持續買超，市場仍有支撐力道。' };
           else if (m8.status === 'red' && data.status === 'red')
-            crossRef = { color: 'text-green-400', text: '🟢 M9 夜盤同步看空，無公股護盤緩衝，市場壓力倍增。' };
+            crossRef = { color: 'text-green-400', text: '🟢 M9 夜盤同步看空，投信亦無買盤緩衝，市場壓力倍增。' };
           else if (m8.status === 'green' && data.status === 'green')
-            crossRef = { color: 'text-red-400', text: '🔴 M9 夜盤同步看多，期貨情緒與公股籌碼共振，多方信心增強。' };
+            crossRef = { color: 'text-red-400', text: '🔴 M9 夜盤同步看多，期貨情緒與投信籌碼共振，多方信心增強。' };
         }
       }
 
@@ -1032,63 +1032,29 @@
           finally    { setModuleLoading(prev => ({...prev, M7:false})); }
         };
 
-        // M8 公股銀行動向
+        // M8 投信動向（原公股銀行，資料來源已下架，改用投信）
         const processM7 = async () => {
           try {
-            const BANKS = {
-              tcb: '合庫', bot: '台銀', land: '土銀', hncb: '華南',
-              mega: '兆豐', tbb: '台企銀', chb: '彰銀', first: '第一金',
-            };
+            const res = await fetch('./data/institutional.json');
+            if (!res.ok) throw new Error('institutional.json 載入失敗');
+            const all = await res.json();
 
-            // 1. 先嘗試 GitHub Action 每日更新的 JSON
-            // 2. fallback 到 localStorage（由 update-bank.html 橋接寫入）
-            let raw = null;
-            try {
-              const res = await fetch('./data/public-bank.json');
-              if (res.ok) raw = await res.json();
-            } catch(e) {}
-
-            if (!raw || raw.length === 0) {
-              const cached = localStorage.getItem('wantgoo-bank-data');
-              if (cached) {
-                raw = JSON.parse(cached);
-                console.log('[M8] Using localStorage cache');
-              }
-            }
-
-            if (!raw || raw.length === 0) throw new Error('公股銀行資料尚未建立。請前往 update-bank.html 依指示更新一次。');
-
-            // 由新到舊排序，計算每日合計
-            // 支援兩種格式：{date, total} 精簡版 或 {date, bot:{amount}, ...} 原始版
-            const series = raw
-              .map(d => {
-                const total = d.total !== undefined
-                  ? d.total
-                  : Math.round(Object.keys(BANKS).reduce((s, k) => s + (d[k]?.amount || 0), 0));
-                return { date: d.date.slice(0, 10), total };
-              })
+            const series = all
+              .filter(d => d.name === 'Investment_Trust')
+              .map(d => ({ date: d.date.slice(0, 10), total: Math.round((d.buy - d.sell) / 10000) }))
               .sort((a, b) => a.date.localeCompare(b.date));
 
-            // 近5日合計
+            if (!series.length) throw new Error('投信資料不足');
+
             const recent5 = series.slice(-5);
             const sum5 = recent5.reduce((s, d) => s + d.total, 0);
 
-            // 近20日中位數（判斷是否異常護盤）
-            const recent20 = series.slice(-20).map(d => d.total);
-            const sorted20 = [...recent20].sort((a, b) => a - b);
-            const median20 = sorted20[Math.floor(sorted20.length / 2)];
-
-            // 連續買超天數
             let consecutiveBuy = 0;
             for (let i = series.length - 1; i >= 0; i--) {
               if (series[i].total > 0) consecutiveBuy++;
               else break;
             }
 
-            // 判斷邏輯
-            // 🟢 護盤：近5日合計>0 且最新一日買超
-            // 🔴 撤退：近5日合計<0
-            // 🟡 其他
             const latest = series[series.length - 1];
             let status = 'yellow';
             if (sum5 > 0 && latest.total > 0) status = 'green';
@@ -1099,8 +1065,8 @@
             setModuleData(prev => ({...prev, M8: {
               status,
               alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.total / 10000 })),
-              summary: `八大公股銀行近5日合計 ${fmt(sum5)}（萬元）。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
-              chartTitle: '八大公股銀行每日買賣超合計 (萬元，近60日)',
+              summary: `投信近5日合計 ${fmt(sum5)}。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '投信持續買進，市場信心穩固。' : status === 'red' ? '投信轉為賣超，籌碼壓力浮現。' : '投信方向混合，持續觀察。'}`,
+              chartTitle: '投信每日買賣超合計 (億元，近60日)',
               renderChart: () => (
                 <SvgBarChart
                   data={series.slice(-60)}
