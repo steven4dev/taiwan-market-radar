@@ -16,11 +16,17 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
+
       - name: Update all data files
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: |
           node << 'SCRIPT'
+          const { chromium } = require('playwright');
           const https = require('https');
           const fs   = require('fs');
 
@@ -144,14 +150,61 @@ jobs:
             console.log(`futures: ${merged.length} records, latest: ${merged.at(-1).date}`);
           }
 
-          // ── public-bank.json（M8 公股）── 資料來源已下架，保留既有資料 ──
-          // TWSE TWT49U 為除息計算表，非公股買賣超；wantgoo 公股頁面已 404。
-          // 目前無免費自動化資料源，保留既有 data/public-bank.json 不更新。
+          // ── public-bank.json（M8 公股）── 使用 Playwright 從 wantgoo 抓取 ──
           async function updatePublicBank() {
             const existing = readJSON('data/public-bank.json');
             const latest   = latestDate(existing);
-            console.log(`public-bank: 資料來源已停用，保留現有 ${existing.length} 筆，最新日期 ${latest || '無'}。`);
-            console.log('public-bank: 如需更新，請人工提供資料或改用付費 API (FinMind TaiwanStockGovernmentBankBuySell)。');
+            if (latest >= today) { console.log('public-bank: up to date'); return; }
+
+            console.log(`public-bank: fetching from wantgoo (latest=${latest || '無'})`);
+            const BANKS = ['bot', 'land', 'tcb', 'hncb', 'mega', 'tbb', 'chb', 'first'];
+
+            const browser = await chromium.launch({
+              args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+            });
+            try {
+              const ctx  = await browser.newContext({
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                extraHTTPHeaders: {
+                  'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                  'sec-ch-ua-mobile': '?0',
+                  'sec-ch-ua-platform': '"Windows"',
+                },
+              });
+              const page = await ctx.newPage();
+
+              let rawBody = null;
+              page.on('response', async r => {
+                if (r.url().includes('trend-data') && r.status() === 200) {
+                  rawBody = await r.body();
+                }
+              });
+
+              await page.goto('https://www.wantgoo.com/stock/public-bank/trend', { timeout: 30000 });
+              await page.waitForTimeout(10000);
+
+              if (!rawBody) throw new Error('wantgoo trend-data 未回應');
+
+              const wantgoo = JSON.parse(rawBody.toString());
+              const existDates = new Set(existing.map(r => r.date));
+              const newRows = wantgoo
+                .map(r => ({
+                  date:  r.date.slice(0, 10),
+                  total: Math.round(BANKS.reduce((s, b) => s + (r[b]?.amount || 0), 0)),
+                }))
+                .filter(r => r.date > (latest || ''));
+
+              if (!newRows.length) { console.log('public-bank: no new data'); return; }
+
+              const merged = [...existing, ...newRows]
+                .filter((r, i, a) => a.findIndex(x => x.date === r.date) === i)
+                .sort((a, b) => a.date.localeCompare(b.date));
+
+              writeJSON('data/public-bank.json', merged);
+              console.log(`public-bank: ${merged.length} records, latest: ${merged.at(-1).date}`);
+            } finally {
+              await browser.close();
+            }
           }
 
           // ── 執行 ──────────────────────────────────────────────────
