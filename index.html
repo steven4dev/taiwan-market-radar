@@ -391,11 +391,10 @@
                     WebkitBackdropFilter: 'blur(18px)',
                     border: '1px solid rgba(255,255,255,0.12)',
                     boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                    ...(tipOnLeft
+                      ? { right: `${(1 - hovIdx / n) * 100}%`, transform: 'translateX(-12px)' }
+                      : { left:  `${(hovIdx + 1) / n * 100}%`, transform: 'translateX(8px)' }),
                   }}
-                  style={tipOnLeft
-                    ? { right: `${(1 - hovIdx / n) * 100}%`, transform: 'translateX(-12px)' }
-                    : { left:  `${(hovIdx + 1) / n * 100}%`, transform: 'translateX(8px)' }
-                  }
                 >
                   <p className="text-white font-bold mb-2 border-b border-gray-700 pb-1">{hovDate}</p>
                   {rows.map(r => {
