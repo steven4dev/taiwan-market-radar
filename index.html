@@ -384,7 +384,14 @@
               {/* Tooltip */}
               {hovDate && (
                 <div
-                  className="absolute top-2 pointer-events-none z-20 bg-gray-950/95 border border-gray-600 rounded-xl shadow-2xl text-xs p-3 min-w-[148px]"
+                  className="absolute top-2 pointer-events-none z-20 rounded-xl text-xs p-3 min-w-[148px]"
+                  style={{
+                    background: 'rgba(15,20,30,0.55)',
+                    backdropFilter: 'blur(18px)',
+                    WebkitBackdropFilter: 'blur(18px)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                  }}
                   style={tipOnLeft
                     ? { right: `${(1 - hovIdx / n) * 100}%`, transform: 'translateX(-12px)' }
                     : { left:  `${(hovIdx + 1) / n * 100}%`, transform: 'translateX(8px)' }
