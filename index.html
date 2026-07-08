@@ -661,6 +661,44 @@
     };
 
     // ==========================================
+    // 4b. M1 可縮放圖表元件
+    // ==========================================
+    const M1ZoomChart = ({ taiexData, keyLevel }) => {
+      const { useState } = React;
+      const STEPS = [30, 60, 90, 120, 180, 250];
+      const [stepIdx, setStepIdx] = useState(3); // 預設 120 天
+      const days = STEPS[stepIdx];
+      const chartData = taiexData.slice(-days).map(d => ({ ...d, keyLevel }));
+      return (
+        <div>
+          <SvgLineChart
+            data={chartData}
+            lines={[
+              { key:'close',    color:'#ffffff', width:'2'   },
+              { key:'keyLevel', color:'#ef4444', width:'1.5' },
+            ]}
+            height={100}
+          />
+          <div className="flex items-center justify-end gap-2 mt-2">
+            <button
+              onClick={() => setStepIdx(i => Math.max(0, i - 1))}
+              disabled={stepIdx === 0}
+              title="放大（減少天數）"
+              className="w-7 h-7 flex items-center justify-center rounded text-sm font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed select-none"
+            >＋</button>
+            <span className="text-xs text-gray-500 w-14 text-center select-none">{days} 天</span>
+            <button
+              onClick={() => setStepIdx(i => Math.min(STEPS.length - 1, i + 1))}
+              disabled={stepIdx === STEPS.length - 1}
+              title="縮小（增加天數）"
+              className="w-7 h-7 flex items-center justify-center rounded text-sm font-bold text-gray-300 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 disabled:cursor-not-allowed select-none"
+            >－</button>
+          </div>
+        </div>
+      );
+    };
+
+    // ==========================================
     // 5. ModuleCard
     // ==========================================
     const ModuleCard = ({ id, data, loading, error, isExpanded, onToggle, allModuleData }) => {
@@ -811,8 +849,6 @@
             const status  = isAbove ? 'green' : 'red';
 
             // 圖表：近 120 日 TAIEX + 分水嶺水平線
-            const chartData = taiexData.slice(-120).map(d => ({ ...d, keyLevel: KEY_LOW }));
-
             setModuleData(prev => ({...prev, M1: {
               status,
               alignedData: taiexData.slice(-60).map(d => ({ date: d.date, value: d.close })),
@@ -824,14 +860,7 @@
                 </span>
               ),
               renderChart: () => (
-                <SvgLineChart
-                  data={chartData}
-                  lines={[
-                    { key:'close',    color:'#ffffff', width:'2'   },
-                    { key:'keyLevel', color:'#ef4444', width:'1.5' },
-                  ]}
-                  height={100}
-                />
+                <M1ZoomChart taiexData={taiexData} keyLevel={KEY_LOW} />
               ),
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M1:e.message})); }
