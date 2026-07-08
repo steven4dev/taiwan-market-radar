@@ -668,7 +668,9 @@
       const STEPS = [30, 60, 90, 120, 180, 250];
       const [stepIdx, setStepIdx] = useState(3); // 預設 120 天
       const days = STEPS[stepIdx];
-      const chartData = taiexData.slice(-days).map(d => ({ ...d, keyLevel }));
+      const withSMA = calculateSMA(taiexData.map(d => ({ date: d.date, close: d.close })), 60);
+      const byDate = Object.fromEntries(withSMA.map(d => [d.date, d.sma60]));
+      const chartData = taiexData.slice(-days).map(d => ({ ...d, keyLevel, sma60: byDate[d.date] ?? null }));
       return (
         <div>
           <SvgLineChart
@@ -676,6 +678,7 @@
             lines={[
               { key:'close',    color:'#ffffff', width:'2'   },
               { key:'keyLevel', color:'#ef4444', width:'1.5' },
+              { key:'sma60',    color:'#facc15', width:'1.5' },
             ]}
             height={100}
           />
