@@ -804,38 +804,34 @@
         // M2
         const processM1 = async () => {
           try {
-            const [tsmc, delta, mtk, etf50, lev2x] = await Promise.all([
+            const [tsmc, delta, mtk, etf50] = await Promise.all([
               fetchFinMind('TaiwanStockPrice', '2330', token, startDate),
               fetchFinMind('TaiwanStockPrice', '2308', token, startDate),
               fetchFinMind('TaiwanStockPrice', '2454', token, startDate),
               fetchFinMind('TaiwanStockPrice', '0050', token, startDate),
-              fetchFinMind('TaiwanStockPrice', '00685L', token, startDate),
             ]);
             const tsmcData  = calculateSMA(tsmc.map(d => ({ date:d.date, close:d.close })), 60);
             const deltaData = calculateSMA(delta.map(d => ({ date:d.date, close:d.close })), 60);
             const mtkData   = calculateSMA(mtk.map(d => ({ date:d.date, close:d.close })), 60);
             const etf50Data = calculateSMA(etf50.map(d => ({ date:d.date, close:d.close })), 60);
-            const lev2xData = calculateSMA(lev2x.map(d => ({ date:d.date, close:d.close })), 60);
 
             const lastT  = tsmcData[tsmcData.length-1];
             const lastD  = deltaData[deltaData.length-1];
             const lastM  = mtkData[mtkData.length-1];
             const lastE  = etf50Data[etf50Data.length-1];
-            const lastL  = lev2xData[lev2xData.length-1];
             const tsmcAbove  = lastT.close > lastT.sma60;
             const deltaAbove = lastD.close > lastD.sma60;
             const mtkAbove   = lastM.close > lastM.sma60;
             const etf50Above = lastE.close > lastE.sma60;
-            const lev2xAbove = lastL.close > lastL.sma60;
-            const aboveCount = [tsmcAbove, deltaAbove, mtkAbove, etf50Above, lev2xAbove].filter(Boolean).length;
+            const aboveCount = [tsmcAbove, deltaAbove, mtkAbove, etf50Above].filter(Boolean).length;
 
             let status = 'green';
-            if (aboveCount <= 3) status = 'yellow';
-            if (aboveCount <= 2 || !tsmcAbove) status = 'red';
+            if (aboveCount <= 2) status = 'yellow';
+            if (aboveCount <= 1 || !tsmcAbove) status = 'red';
 
             setModuleData(prev => ({...prev, M2: {
               status,
-              summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，0050${etf50Above?'站上':'跌破'}季線，正2(00685L)${lev2xAbove?'站上':'跌破'}季線。共 ${aboveCount}/5 檔位於季線之上。`,
+              summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，0050${etf50Above?'站上':'跌破'}季線。共 ${aboveCount}/4 檔位於季線之上。`,
               chartTitle: '權值股近期走勢 (過去 120 日)',
               legend: (
                 <span className="flex items-center gap-1">
@@ -849,7 +845,6 @@
                     ['2308 台達電', deltaData, '#4ade80'],
                     ['2454 聯發科', mtkData,   '#c084fc'],
                     ['0050 元大台灣50', etf50Data, '#fb923c'],
-                    ['00685L 富邦正2', lev2xData, '#f43f5e'],
                   ].map(([label, d, color]) => (
                     <div key={label}>
                       <p className="text-xs font-medium mb-1" style={{color}}>{label}</p>
