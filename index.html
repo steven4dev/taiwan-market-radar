@@ -1234,10 +1234,12 @@
                 }))));
             if (!raw || raw.length === 0) throw new Error('台指期資料不足');
 
-            // 取近月合約（contract_date 最近且大於今日）
+            // 取近月合約：找有實際夜盤資料（close>0）的最近 YYYYMM 合約
             const today = new Date().toISOString().slice(0,7).replace('-','');
-            const contracts = [...new Set(raw.map(d => d.contract_date))].sort();
-            const nearContract = contracts.find(c => c >= today) || contracts[contracts.length - 1];
+            const validAfter = raw.filter(d => d.trading_session === 'after_market' && d.close > 0 && /^\d{6}$/.test(d.contract_date));
+            const latestAfterDate = validAfter.reduce((m, d) => d.date > m ? d.date : m, '');
+            const recentContracts = [...new Set(validAfter.filter(d => d.date === latestAfterDate).map(d => d.contract_date))].sort();
+            const nearContract = recentContracts[0] || today;
 
             // 夜盤 & 日盤資料（近月）
             const afterMkt = raw.filter(d => d.trading_session === 'after_market' && d.contract_date === nearContract)
