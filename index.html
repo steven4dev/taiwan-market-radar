@@ -208,11 +208,6 @@
       const chartRef = useRef(null);
 
       const allDates = useMemo(() => {
-        // 以 M1（大盤）日期為基準；若 M1 尚未載入則退回聯集
-        const m1 = moduleData.M1?.alignedData;
-        if (m1 && m1.length > 0) {
-          return [...m1].sort((a,b) => a.date.localeCompare(b.date)).slice(-60).map(d => d.date);
-        }
         const s = new Set();
         Object.values(moduleData).forEach(d => {
           if (d?.alignedData) d.alignedData.forEach(p => s.add(p.date));
