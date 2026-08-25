@@ -181,7 +181,7 @@ jobs:
               });
 
               await page.goto('https://www.wantgoo.com/stock/public-bank/trend', { timeout: 30000 });
-              await page.waitForTimeout(10000);
+              await page.waitForTimeout(20000);
 
               if (!rawBody) throw new Error('wantgoo trend-data 未回應');
 
