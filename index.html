@@ -400,10 +400,20 @@
                     const col = r.colorFn
                       ? (v != null ? r.colorFn(v) : '#6b7280')
                       : r.color;
+                    const showArrow = (r.id === 'M1' || r.id === 'M7') && v != null && hovIdx > 0;
+                    const prevDate = showArrow ? allDates[hovIdx - 1] : null;
+                    const prevV = prevDate ? r.byDate[prevDate] : null;
+                    const arrow = showArrow && prevV != null
+                      ? (v > prevV ? '↗' : v < prevV ? '↘' : '')
+                      : '';
+                    const arrowCol = arrow === '↗' ? '#ef4444' : arrow === '↘' ? '#22c55e' : '';
                     return (
                       <div key={r.id} className="flex justify-between items-center gap-4 mb-1">
                         <span className="text-gray-400">{r.label}</span>
-                        <span className="font-mono font-semibold" style={{color: col}}>{r.fmt(v)}</span>
+                        <span className="font-mono font-semibold" style={{color: col}}>
+                          {arrow && <span style={{color: arrowCol, marginRight: '3px'}}>{arrow}</span>}
+                          {r.fmt(v)}
+                        </span>
                       </div>
                     );
                   })}
