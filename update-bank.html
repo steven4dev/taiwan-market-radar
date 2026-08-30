@@ -5,69 +5,92 @@
   <title>更新公股銀行資料</title>
   <style>
     body { background:#111827; color:#fff; font-family:sans-serif; padding:40px; max-width:700px; margin:0 auto; }
-    h1 { color:#22c55e; }
-    pre { background:#1f2937; padding:16px; border-radius:8px; font-size:13px; overflow-x:auto; color:#86efac; }
+    h1 { color:#22c55e; margin-bottom:4px; }
+    p.sub { color:#9ca3af; margin-top:0; }
+    pre { background:#0f172a; padding:14px 16px; border-radius:8px; font-size:13px; overflow-x:auto; color:#86efac; line-height:1.6; white-space:pre-wrap; word-break:break-all; }
     .step { background:#1f2937; border:1px solid #374151; border-radius:12px; padding:20px; margin:16px 0; }
     .step h3 { margin:0 0 8px; color:#facc15; }
-    .btn { background:#22c55e; color:#000; border:none; padding:12px 24px; border-radius:8px; font-size:15px; cursor:pointer; font-weight:bold; }
+    .step p { color:#d1d5db; margin:4px 0 10px; }
+    .btn { background:#22c55e; color:#000; border:none; padding:10px 22px; border-radius:8px; font-size:14px; cursor:pointer; font-weight:bold; }
     .btn:hover { background:#16a34a; }
-    .success { background:#052e16; border:1px solid #22c55e; border-radius:8px; padding:16px; color:#86efac; display:none; }
-    #status { margin-top:16px; color:#f87171; }
+    .success { background:#052e16; border:1px solid #22c55e; border-radius:8px; padding:14px; color:#86efac; display:none; margin-top:12px; }
+    #status { margin-top:12px; font-size:14px; color:#f87171; }
+    #status.ok { color:#86efac; }
+    a.back { color:#60a5fa; display:inline-block; margin-top:14px; font-size:14px; }
+    .tag { display:inline-block; background:#1d4ed8; color:#bfdbfe; font-size:11px; padding:2px 8px; border-radius:4px; vertical-align:middle; margin-left:6px; }
   </style>
 </head>
 <body>
   <h1>⚡ 更新八大公股銀行資料</h1>
-  <p style="color:#9ca3af">由於 wantgoo.com 的 CORS 限制，請依以下步驟手動更新資料：</p>
+  <p class="sub">資料儲存於瀏覽器 localStorage，更新後立即生效。</p>
 
   <div class="step">
-    <h3>步驟 1 — 在 wantgoo.com 開啟瀏覽器 Console</h3>
-    <p style="color:#d1d5db">開啟 <a href="https://www.wantgoo.com/stock/public-bank/trend" target="_blank" style="color:#60a5fa">wantgoo 八大公股銀行頁面</a>，按 <strong>F12</strong> 開啟 DevTools，切換到 <strong>Console</strong> 分頁。</p>
+    <h3>步驟 1 — 開啟 HiStock 頁面 <span class="tag">推薦</span></h3>
+    <p>開啟 <a href="https://histock.tw/stock/broker8.aspx" target="_blank" style="color:#60a5fa">histock 八大公股行庫買賣超</a>，等頁面圖表載入完成。</p>
   </div>
 
   <div class="step">
-    <h3>步驟 2 — 貼上並執行以下指令</h3>
-    <p style="color:#d1d5db">複製下方程式碼，貼入 Console 後按 Enter：</p>
-    <pre id="snippet">fetch('/stock/public-bank/trend-data?market=-1')
-  .then(r => r.json())
-  .then(d => {
-    const url = 'https://steven4dev.github.io/taiwan-market-radar/update-bank.html#' + btoa(unescape(encodeURIComponent(JSON.stringify(d))));
-    window.open(url, '_blank');
-  });</pre>
-    <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('snippet').textContent).then(()=>{this.textContent='✅ 已複製！';setTimeout(()=>this.textContent='複製指令',2000)})">複製指令</button>
+    <h3>步驟 2 — 按 F12，在 Console 貼上並執行</h3>
+    <p>複製下方指令，貼入 DevTools Console 後按 Enter：</p>
+    <pre id="snippet">const s=Highcharts.charts.filter(Boolean)[0].series[0];
+const d=s.data.filter(p=>p.x&&p.y!=null).map(p=>({date:new Date(p.x).toISOString().slice(0,10),amount:p.y}));
+window.open('https://steven4dev.github.io/taiwan-market-radar/update-bank.html#hs_'+btoa(unescape(encodeURIComponent(JSON.stringify(d)))),'_blank');</pre>
+    <button class="btn" onclick="copySnippet(this)">📋 複製指令</button>
   </div>
 
   <div class="step">
-    <h3>步驟 3 — 回到此頁，資料會自動儲存</h3>
-    <p style="color:#d1d5db">執行指令後會開啟此頁新分頁，資料自動寫入 localStorage。</p>
-    <div id="status">等待資料...</div>
-    <div class="success" id="successMsg">✅ 資料儲存成功！返回主頁面即可看到 M7 公股銀行動向。</div>
-    <a href="/" style="color:#60a5fa; display:block; margin-top:12px;">← 返回主頁</a>
+    <h3>步驟 3 — 等待新分頁自動儲存</h3>
+    <p>執行後會開啟此頁新分頁，資料自動寫入 localStorage。</p>
+    <div id="status">等待資料中...</div>
+    <div class="success" id="successMsg">✅ 資料儲存成功！返回主頁即可看到 M8 公股銀行動向。</div>
+    <a class="back" href="/">← 返回主頁</a>
   </div>
 
   <script>
-    // Try to read data from URL hash
+    function copySnippet(btn) {
+      navigator.clipboard.writeText(document.getElementById('snippet').textContent)
+        .then(() => { btn.textContent = '✅ 已複製！'; setTimeout(() => btn.textContent = '📋 複製指令', 2000); });
+    }
+
     function tryLoadFromHash() {
       const hash = location.hash.slice(1);
-      if (!hash) { document.getElementById('status').textContent = '尚未收到資料，請依步驟操作。'; return; }
+      if (!hash) return;
+
       try {
-        const data = JSON.parse(decodeURIComponent(escape(atob(hash))));
-        if (!Array.isArray(data) || data.length === 0) throw new Error('invalid');
-        localStorage.setItem('wantgoo-bank-data', JSON.stringify(data));
-        localStorage.setItem('wantgoo-bank-updated', new Date().toISOString());
+        let data, key;
+        if (hash.startsWith('hs_')) {
+          // histock format: {date, amount} 億元
+          data = JSON.parse(decodeURIComponent(escape(atob(hash.slice(3)))));
+          key = 'histock-bank-data';
+        } else {
+          // wantgoo format
+          data = JSON.parse(decodeURIComponent(escape(atob(hash))));
+          key = 'wantgoo-bank-data';
+        }
+
+        if (!Array.isArray(data) || data.length === 0) throw new Error('資料格式異常');
+
+        localStorage.setItem(key, JSON.stringify(data));
+        localStorage.setItem('bank-data-updated', new Date().toISOString());
+        localStorage.setItem('bank-data-source', key === 'histock-bank-data' ? 'histock' : 'wantgoo');
+
         document.getElementById('status').style.display = 'none';
         document.getElementById('successMsg').style.display = 'block';
-        console.log('Saved', data.length, 'records');
+        document.getElementById('successMsg').textContent = `✅ 已儲存 ${data.length} 筆資料（${key === 'histock-bank-data' ? 'HiStock' : 'Wantgoo'}）！返回主頁即可看到 M8 公股銀行動向。`;
       } catch(e) {
         document.getElementById('status').textContent = '資料解析失敗：' + e.message;
       }
     }
+
     tryLoadFromHash();
 
-    // Also check if already have data
-    const existing = localStorage.getItem('wantgoo-bank-data');
-    if (existing) {
-      const updated = localStorage.getItem('wantgoo-bank-updated');
-      document.getElementById('status').textContent = `已有快取資料（更新時間：${updated ? new Date(updated).toLocaleString('zh-TW') : '未知'}）`;
+    // Show existing cache status
+    const updated = localStorage.getItem('bank-data-updated');
+    const source  = localStorage.getItem('bank-data-source');
+    if (updated && !location.hash) {
+      const el = document.getElementById('status');
+      el.className = 'ok';
+      el.textContent = `已有快取資料（來源：${source || '未知'}，更新時間：${new Date(updated).toLocaleString('zh-TW')}）`;
     }
   </script>
 </body>

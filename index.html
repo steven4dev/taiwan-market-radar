@@ -1145,30 +1145,53 @@
               mega: '兆豐', tbb: '台企銀', chb: '彰銀', first: '第一金',
             };
 
-            let raw = null;
-            try {
-              const res = await fetch('./data/public-bank.json');
-              if (res.ok) raw = await res.json();
-            } catch(e) {}
+            // 嘗試三個資料來源：histock localStorage > wantgoo localStorage > public-bank.json
+            let series = null;
 
-            if (!raw || raw.length === 0) {
-              const cached = localStorage.getItem('wantgoo-bank-data');
-              if (cached) {
-                raw = JSON.parse(cached);
-                console.log('[M8] Using localStorage cache');
+            // 來源 1：histock localStorage（{date, amount} 億元）
+            const histockCached = localStorage.getItem('histock-bank-data');
+            if (histockCached) {
+              const parsed = JSON.parse(histockCached);
+              series = parsed
+                .filter(d => d.date && d.amount != null)
+                .map(d => ({ date: d.date.slice(0, 10), total: d.amount })) // 億元
+                .sort((a, b) => a.date.localeCompare(b.date));
+              console.log('[M8] Using histock localStorage, records:', series.length);
+            }
+
+            // 來源 2：wantgoo localStorage（per-bank 萬元）
+            if (!series) {
+              const wantgooCached = localStorage.getItem('wantgoo-bank-data');
+              if (wantgooCached) {
+                const raw = JSON.parse(wantgooCached);
+                series = raw.map(d => {
+                  const total = d.total !== undefined
+                    ? d.total / 10000
+                    : Object.keys(BANKS).reduce((s, k) => s + (d[k]?.amount || 0), 0) / 10000;
+                  return { date: d.date.slice(0, 10), total };
+                }).sort((a, b) => a.date.localeCompare(b.date));
+                console.log('[M8] Using wantgoo localStorage');
               }
             }
 
-            if (!raw || raw.length === 0) throw new Error('公股銀行資料尚未建立。');
+            // 來源 3：public-bank.json（wantgoo 格式，萬元）
+            if (!series) {
+              try {
+                const res = await fetch('./data/public-bank.json');
+                if (res.ok) {
+                  const raw = await res.json();
+                  series = raw.map(d => {
+                    const total = d.total !== undefined
+                      ? d.total / 10000
+                      : Object.keys(BANKS).reduce((s, k) => s + (d[k]?.amount || 0), 0) / 10000;
+                    return { date: d.date.slice(0, 10), total };
+                  }).sort((a, b) => a.date.localeCompare(b.date));
+                }
+              } catch(e) {}
+            }
 
-            const series = raw
-              .map(d => {
-                const total = d.total !== undefined
-                  ? d.total
-                  : Math.round(Object.keys(BANKS).reduce((s, k) => s + (d[k]?.amount || 0), 0));
-                return { date: d.date.slice(0, 10), total };
-              })
-              .sort((a, b) => a.date.localeCompare(b.date));
+            if (!series || series.length === 0)
+              throw new Error('公股銀行資料尚未建立。請前往 update-bank.html 依指示更新一次。');
 
             const recent5 = series.slice(-5);
             const sum5 = recent5.reduce((s, d) => s + d.total, 0);
@@ -1184,13 +1207,13 @@
             if (sum5 > 0 && latest.total > 0) status = 'green';
             if (sum5 < 0) status = 'red';
 
-            const fmt = v => `${v > 0 ? '+' : ''}${(v / 10000).toFixed(1)}億`;
+            const fmt = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}億`;
 
             setModuleData(prev => ({...prev, M8: {
               status,
-              alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.total / 10000 })),
-              summary: `八大公股銀行近5日合計 ${fmt(sum5)}。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
-              chartTitle: '八大公股銀行每日買賣超合計 (萬元，近60日)',
+              alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.total })),
+              summary: `八大公股銀行近5日合計 ${fmt(sum5)}（億元）。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
+              chartTitle: '八大公股銀行每日買賣超合計（億元，近60日）',
               renderChart: () => (
                 <SvgBarChart
                   data={series.slice(-60)}
