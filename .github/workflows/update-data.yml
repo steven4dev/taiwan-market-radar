@@ -16,17 +16,11 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install Playwright
-        run: |
-          npm install playwright
-          npx playwright install --with-deps chromium
-
       - name: Update all data files
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: |
           node << 'SCRIPT'
-          const { chromium } = require('playwright');
           const https = require('https');
           const fs   = require('fs');
 
@@ -150,61 +144,48 @@ jobs:
             console.log(`futures: ${merged.length} records, latest: ${merged.at(-1).date}`);
           }
 
-          // ── public-bank.json（M8 公股）── 使用 Playwright 從 wantgoo 抓取 ──
+          // ── public-bank.json（M8 公股）── 從 histock HTML 解析 inline 圖表資料 ──
           async function updatePublicBank() {
             const existing = readJSON('data/public-bank.json');
             const latest   = latestDate(existing);
             if (latest >= today) { console.log('public-bank: up to date'); return; }
 
-            console.log(`public-bank: fetching from wantgoo (latest=${latest || '無'})`);
-            const BANKS = ['bot', 'land', 'tcb', 'hncb', 'mega', 'tbb', 'chb', 'first'];
-
-            const browser = await chromium.launch({
-              args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
-            });
-            try {
-              const ctx  = await browser.newContext({
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                extraHTTPHeaders: {
-                  'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-                  'sec-ch-ua-mobile': '?0',
-                  'sec-ch-ua-platform': '"Windows"',
-                },
-              });
-              const page = await ctx.newPage();
-
-              let rawBody = null;
-              page.on('response', async r => {
-                if (r.url().includes('trend-data') && r.status() === 200) {
-                  rawBody = await r.body();
+            console.log(`public-bank: fetching from histock (latest=${latest || '無'})`);
+            const html = await new Promise((resolve, reject) => {
+              const req = https.get('https://histock.tw/stock/broker8.aspx', {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                  'Accept': 'text/html,application/xhtml+xml',
+                  'Accept-Language': 'zh-TW,zh;q=0.9',
                 }
+              }, res => {
+                let data = '';
+                res.on('data', c => data += c);
+                res.on('end', () => resolve(data));
               });
+              req.on('error', reject);
+              req.setTimeout(30000, () => { req.destroy(); reject(new Error('histock timeout')); });
+            });
 
-              await page.goto('https://www.wantgoo.com/stock/public-bank/trend', { timeout: 30000 });
-              await page.waitForTimeout(30000);
+            const m = html.match(/"SumMoney":"(\[\[.*?\]\])"/);
+            if (!m) throw new Error('histock SumMoney 未找到');
 
-              if (!rawBody) throw new Error('wantgoo trend-data 未回應');
+            const pairs = JSON.parse(m[1]);
+            const newRows = pairs
+              .map(([ts, val]) => ({
+                date:  new Date(ts).toISOString().slice(0, 10),
+                total: Math.round(val * 10000),
+              }))
+              .filter(r => r.date > (latest || ''));
 
-              const wantgoo = JSON.parse(rawBody.toString());
-              const existDates = new Set(existing.map(r => r.date));
-              const newRows = wantgoo
-                .map(r => ({
-                  date:  r.date.slice(0, 10),
-                  total: Math.round(BANKS.reduce((s, b) => s + (r[b]?.amount || 0), 0)),
-                }))
-                .filter(r => r.date > (latest || ''));
+            if (!newRows.length) { console.log('public-bank: no new data'); return; }
 
-              if (!newRows.length) { console.log('public-bank: no new data'); return; }
+            const merged = [...existing, ...newRows]
+              .filter((r, i, a) => a.findIndex(x => x.date === r.date) === i)
+              .sort((a, b) => a.date.localeCompare(b.date));
 
-              const merged = [...existing, ...newRows]
-                .filter((r, i, a) => a.findIndex(x => x.date === r.date) === i)
-                .sort((a, b) => a.date.localeCompare(b.date));
-
-              writeJSON('data/public-bank.json', merged);
-              console.log(`public-bank: ${merged.length} records, latest: ${merged.at(-1).date}`);
-            } finally {
-              await browser.close();
-            }
+            writeJSON('data/public-bank.json', merged);
+            console.log(`public-bank: ${merged.length} records, latest: ${merged.at(-1).date}`);
           }
 
           // ── 執行 ──────────────────────────────────────────────────
