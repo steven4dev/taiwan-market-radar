@@ -386,11 +386,11 @@
                 <div
                   className="absolute top-2 pointer-events-none z-20 rounded-xl text-xs p-3 min-w-[148px]"
                   style={{
-                    background: 'rgba(15,20,30,0.45)',
-                    backdropFilter: 'blur(20px) saturate(180%)',
-                    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                    background: 'rgba(15,20,30,0.18)',
+                    backdropFilter: 'blur(24px) saturate(200%)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(200%)',
+                    border: '1px solid rgba(255,255,255,0.14)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
                     ...(tipOnLeft
                       ? { right: `${(1 - hovIdx / n) * 100}%`, transform: 'translateX(-12px)' }
                       : { left:  `${(hovIdx + 1) / n * 100}%`, transform: 'translateX(8px)' }),
