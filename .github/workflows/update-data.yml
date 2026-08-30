@@ -181,7 +181,7 @@ jobs:
               });
 
               await page.goto('https://www.wantgoo.com/stock/public-bank/trend', { timeout: 30000 });
-              await page.waitForTimeout(20000);
+              await page.waitForTimeout(30000);
 
               if (!rawBody) throw new Error('wantgoo trend-data 未回應');
 
@@ -209,13 +209,17 @@ jobs:
 
           // ── 執行 ──────────────────────────────────────────────────
           (async () => {
-            try {
-              await updateTaiex();        await sleep(500);
-              await updateInstitutional();await sleep(500);
-              await updateFutures();      await sleep(500);
-              await updatePublicBank();
-              console.log('✅ All updates complete');
-            } catch(e) { console.error('❌', e); process.exit(1); }
+            let anyError = false;
+            const run = async (fn, name) => {
+              try { await fn(); }
+              catch(e) { console.error(`❌ ${name}:`, e.message); anyError = true; }
+            };
+            await run(updateTaiex,         'taiex');        await sleep(500);
+            await run(updateInstitutional, 'institutional');await sleep(500);
+            await run(updateFutures,       'futures');      await sleep(500);
+            await run(updatePublicBank,    'public-bank');
+            if (anyError) { console.warn('⚠️ 部分更新失敗，其他資料已儲存'); process.exit(0); }
+            else { console.log('✅ All updates complete'); }
           })();
           SCRIPT
 
