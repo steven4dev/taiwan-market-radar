@@ -908,7 +908,7 @@
             setModuleData(prev => ({...prev, M2: {
               status,
               summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，0050${etf50Above?'站上':'跌破'}季線。共 ${aboveCount}/4 檔位於季線之上。`,
-              chartTitle: '權值股近期走勢 (過去 120 日)',
+              chartTitle: '權值股走勢（近 120 日）',
               legend: (
                 <span className="flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#facc15'}}></span>60MA
@@ -965,7 +965,7 @@
               status,
               alignedData: sortedDates.slice(-60).map(date => ({ date, value: byDate[date] })),
               summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
-              chartTitle: '外資近 30 日大盤買賣超 (億元)',
+              chartTitle: '外資大盤買賣超（近 30 日，億元）',
               renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
@@ -1038,7 +1038,7 @@
             setModuleData(prev => ({...prev, M4: {
               status,
               summary: `籌碼${cleanLabel}（乾淨度 ${Math.round(cleanScore)}/100）。融資水位處近期 ${Math.round(marginPct)}% 分位，近6日${marginTrend < 0 ? '縮減' : '增加'} ${fmt(marginTrend)}%；融券/融資比 ${cur.ratio.toFixed(2)}%，處近期 ${Math.round(ratioPct)}% 分位。`,
-              chartTitle: '融資餘額（紫）與融券/融資比（橙）近30日',
+              chartTitle: '融資餘額（紫）與融券/融資比（橙）（近 30 日）',
               legend: (
                 <div className="flex gap-3">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#c084fc'}}></span>融資</span>
@@ -1081,7 +1081,7 @@
               status: m4Status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.volume })),
               summary: `大盤今日成交量約 ${Math.round(last.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
-              chartTitle: '加權指數成交量 (億)',
+              chartTitle: '加權指數成交量（近 30 日，億）',
               renderChart: () => <SvgBarChart data={td.slice(-30)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
             }}));
 
@@ -1099,7 +1099,7 @@
               status: m5Status,
               rally20d,
               summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線。MACD 值為 ${last.macd.toFixed(1)}。`,
-              chartTitle: '加權指數走勢與季線(黃)/半年線(紫)',
+              chartTitle: '加權指數走勢與季線（黃）/半年線（紫）（近 120 日）',
               renderChart: () => (
                 <SvgLineChart
                   data={td.slice(-120)}
@@ -1138,7 +1138,7 @@
                   .concat([{ date: nextTD(s[s.length-1].date), value: s[s.length-1].close }]);
               })(),
               summary: `${displayName} 近 5 日漲跌幅為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
-              chartTitle: `${displayName} 走勢 (近3個月)`,
+              chartTitle: `${displayName} 走勢（近 60 日）`,
               renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M7:e.message})); }
@@ -1221,7 +1221,7 @@
               status,
               alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.total })),
               summary: `八大公股銀行近5日合計 ${fmt(sum5)}（億元）。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
-              chartTitle: '八大公股銀行每日買賣超合計（億元，近60日）',
+              chartTitle: '八大公股銀行買賣超合計（近 60 日，億元）',
               renderChart: () => (
                 <SvgBarChart
                   data={series.slice(-60)}
@@ -1309,7 +1309,7 @@
               status,
               alignedData: afterMkt.slice(-60).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) })),
               summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? (latest.spread_per >= 2 ? `單日大漲 ${latest.spread_per.toFixed(1)}%，夜盤強勢看多。` : '夜盤偏多，市場情緒樂觀。') : status === 'red' ? (latest.spread_per <= -2 ? `單日大跌 ${latest.spread_per.toFixed(1)}%，夜盤顯著看空，明日開盤留意風險。` : '夜盤連續偏空，市場情緒謹慎。') : '夜盤方向混合，觀望為宜。'}`,
-              chartTitle: '台指期夜盤漲跌幅（近20日，%）',
+              chartTitle: '台指期夜盤漲跌幅（近 20 日，%）',
               renderChart: () => (
                 <SvgBarChart
                   data={chartData}
