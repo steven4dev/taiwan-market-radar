@@ -953,7 +953,7 @@
             const sortedDates = Object.keys(byDate).sort();
             if (!sortedDates.length) throw new Error('找不到外資買賣超資料');
 
-            const chartData = sortedDates.slice(-30).map(date => ({ date, netBuy: byDate[date] }));
+            const chartData = sortedDates.slice(-60).map(date => ({ date, netBuy: byDate[date] }));
             const n = Math.min(5, chartData.length);
             const last5Total = chartData.slice(-n).reduce((s, d) => s + d.netBuy, 0);
 
@@ -965,7 +965,7 @@
               status,
               alignedData: sortedDates.slice(-60).map(date => ({ date, value: byDate[date] })),
               summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
-              chartTitle: '外資大盤買賣超（近 30 日，億元）',
+              chartTitle: '外資大盤買賣超（近 60 日，億元）',
               renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
@@ -994,7 +994,7 @@
             const sortedDates = Object.keys(byDate).sort().filter(d => byDate[d].margin > 0);
             if (sortedDates.length < 5) throw new Error('可用籌碼數據不足');
 
-            const series = sortedDates.slice(-30).map(date => ({
+            const series = sortedDates.slice(-60).map(date => ({
               date,
               margin: byDate[date].margin,
               short:  byDate[date].short,
@@ -1038,7 +1038,7 @@
             setModuleData(prev => ({...prev, M4: {
               status,
               summary: `籌碼${cleanLabel}（乾淨度 ${Math.round(cleanScore)}/100）。融資水位處近期 ${Math.round(marginPct)}% 分位，近6日${marginTrend < 0 ? '縮減' : '增加'} ${fmt(marginTrend)}%；融券/融資比 ${cur.ratio.toFixed(2)}%，處近期 ${Math.round(ratioPct)}% 分位。`,
-              chartTitle: '融資餘額（紫）與融券/融資比（橙）（近 30 日）',
+              chartTitle: '融資餘額（紫）與融券/融資比（橙）（近 60 日）',
               legend: (
                 <div className="flex gap-3">
                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#c084fc'}}></span>融資</span>
@@ -1081,8 +1081,8 @@
               status: m4Status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.volume })),
               summary: `大盤今日成交量約 ${Math.round(last.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
-              chartTitle: '加權指數成交量（近 30 日，億）',
-              renderChart: () => <SvgBarChart data={td.slice(-30)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
+              chartTitle: '加權指數成交量（近 60 日，億）',
+              renderChart: () => <SvgBarChart data={td.slice(-60)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
             }}));
 
             const over60  = last.close > last.sma60;
@@ -1299,8 +1299,8 @@
             if (latest.spread_per >= 2 || (bullDays >= 3 && latest.spread_per > 0)) status = 'green';
             if (latest.spread_per <= -2 || (bearDays >= 2 && latest.spread_per < 0)) status = 'red';
 
-            // 圖表資料：近20日夜盤漲跌幅
-            const chartData = afterMkt.slice(-20).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) }));
+            // 圖表資料：近60日夜盤漲跌幅
+            const chartData = afterMkt.slice(-60).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) }));
 
             const dirStr = latest.spread_per > 0 ? `上漲 +${latest.spread_per.toFixed(2)}%` : `下跌 ${latest.spread_per.toFixed(2)}%`;
             const basisStr = basis !== null ? `，期現差 ${basis > 0 ? '+' : ''}${Math.round(basis)} 點 (${basisPct}%)` : '';
@@ -1309,7 +1309,7 @@
               status,
               alignedData: afterMkt.slice(-60).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) })),
               summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? (latest.spread_per >= 2 ? `單日大漲 ${latest.spread_per.toFixed(1)}%，夜盤強勢看多。` : '夜盤偏多，市場情緒樂觀。') : status === 'red' ? (latest.spread_per <= -2 ? `單日大跌 ${latest.spread_per.toFixed(1)}%，夜盤顯著看空，明日開盤留意風險。` : '夜盤連續偏空，市場情緒謹慎。') : '夜盤方向混合，觀望為宜。'}`,
-              chartTitle: '台指期夜盤漲跌幅（近 20 日，%）',
+              chartTitle: '台指期夜盤漲跌幅（近 60 日，%）',
               renderChart: () => (
                 <SvgBarChart
                   data={chartData}
