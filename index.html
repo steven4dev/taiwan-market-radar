@@ -232,9 +232,12 @@
 
       const ROWS_DEF = [
         { id:'M1', label:'大盤',  type:'line', color:'#e5e7eb', fmt: v => v != null ? v.toLocaleString() : '—' },
-        { id:'M7', label:'SOX',    type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
+        { id:'M2', label:'台積電', type:'line', color:'#facc15', fmt: v => v != null ? v.toLocaleString() : '—' },
+        { id:'M7', label:'SOX',   type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
+        { id:'M6', label:'MACD',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? v.toFixed(1) : '—' },
         { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
         { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
+        { id:'M4', label:'融資',  type:'line', color:'#c084fc', fmt: v => v != null ? `${Math.round(v)}億` : '—' },
         { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
       ];
@@ -907,6 +910,7 @@
 
             setModuleData(prev => ({...prev, M2: {
               status,
+              alignedData: tsmcData.slice(-60).map(d => ({ date: d.date, value: d.close })),
               summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，0050${etf50Above?'站上':'跌破'}季線。共 ${aboveCount}/4 檔位於季線之上。`,
               chartTitle: '權值股走勢（近 120 日）',
               legend: (
@@ -1037,6 +1041,7 @@
 
             setModuleData(prev => ({...prev, M4: {
               status,
+              alignedData: series.map(d => ({ date: d.date, value: Math.round(d.margin / 100000) })),
               summary: `籌碼${cleanLabel}（乾淨度 ${Math.round(cleanScore)}/100）。融資水位處近期 ${Math.round(marginPct)}% 分位，近6日${marginTrend < 0 ? '縮減' : '增加'} ${fmt(marginTrend)}%；融券/融資比 ${cur.ratio.toFixed(2)}%，處近期 ${Math.round(ratioPct)}% 分位。`,
               chartTitle: '融資餘額（紫）與融券/融資比（橙）（近 60 日）',
               legend: (
@@ -1098,6 +1103,7 @@
             setModuleData(p => ({...p, M6: {
               status: m5Status,
               rally20d,
+              alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.macd ?? null })),
               summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線。MACD 值為 ${last.macd.toFixed(1)}。`,
               chartTitle: '加權指數走勢與季線（黃）/半年線（紫）（近 120 日）',
               renderChart: () => (
