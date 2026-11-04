@@ -317,10 +317,52 @@
       );
     };
 
+    // M11 策略切換：新＝柱體收斂第 3 根；舊＝柱體正負轉換。摘要與面板共用，並記住上次選擇。
+    const m11Store = (() => {
+      let v = 'conv';
+      try { const x = localStorage.getItem('m11-strategy'); if (x === 'conv' || x === 'cross') v = x; } catch (e) {}
+      return {
+        subs: new Set(),
+        get: () => v,
+        set(x) { v = x; try { localStorage.setItem('m11-strategy', x); } catch (e) {} this.subs.forEach(f => f(x)); },
+      };
+    })();
+    const useM11Strategy = () => {
+      const [v, setV] = useState(m11Store.get());
+      useEffect(() => { m11Store.subs.add(setV); return () => { m11Store.subs.delete(setV); }; }, []);
+      return [v, x => m11Store.set(x)];
+    };
+
+    const M11Summary = ({ base, info }) => {
+      const [strat, setStrat] = useM11Strategy();
+      const OPTS = [
+        ['conv', '新｜收斂第 3 根', '空手時綠柱連續收斂第 3 根買進；持有時紅柱連續收斂第 3 根賣出'],
+        ['cross', '舊｜正負轉換', '柱體由負轉正買進；由正轉負賣出'],
+      ];
+      return (
+        <>
+          {base}{info[strat]}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-gray-500">買賣策略</span>
+            <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
+              {OPTS.map(([k, label, tip]) => (
+                <button key={k} title={tip} onClick={() => setStrat(k)}
+                  className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${strat === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      );
+    };
+
     // M11 面板：區間切換 + 勝率/輸贏統計 + 圖表
     const M11Panel = ({ td }) => {
       const { useMemo } = React;
       const [range, setRange] = useState(120);
+      const [strat] = useM11Strategy();
+      const sigKey = strat === 'conv' ? 'sigConv' : 'sigCross';
       const WARM = 140;                       // 慢線 EMA130 暖機期，其前的訊號不計
       const n = td.length;
       const RANGES = [
@@ -334,8 +376,8 @@
         const raw = [];
         let oi = null;
         td.forEach((d, i) => {
-          if (d.signal === 'buy') oi = i;
-          else if (d.signal === 'sell' && oi != null) { raw.push({ i0: oi, i1: i, open: false }); oi = null; }
+          if (d[sigKey] === 'buy') oi = i;
+          else if (d[sigKey] === 'sell' && oi != null) { raw.push({ i0: oi, i1: i, open: false }); oi = null; }
         });
         if (oi != null) raw.push({ i0: oi, i1: n - 1, open: true });
 
@@ -357,8 +399,8 @@
           total: (rets.reduce((e, r) => e * (1 + r / 100), 1) - 1) * 100,
           best: Math.max(...rets), worst: Math.min(...rets),
         } : null;
-        return { view: td.slice(viewStart), trades, stats, openTrade: trades.find(t => t.open) || null };
-      }, [td, size]);
+        return { view: td.slice(viewStart).map(d => ({ ...d, signal: d[sigKey] })), trades, stats, openTrade: trades.find(t => t.open) || null };
+      }, [td, size, sigKey]);
 
       const sg = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
       const rc = v => (v == null ? 'text-gray-400' : v > 0 ? 'text-red-400' : 'text-green-400');
@@ -373,7 +415,12 @@
       return (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <p className="text-xs text-gray-500">統計＝區間內「賣出」的已平倉波段 · 收盤價計，未含手續費與證交稅</p>
+            <div>
+              <p className="text-xs text-gray-300">策略規則：{strat === 'conv'
+                ? '空手時綠柱連續收斂第 3 根收盤買進；持有時紅柱連續收斂第 3 根收盤賣出（收斂＝同色柱比前一根短）'
+                : '柱體由負轉正收盤買進；由正轉負收盤賣出'}</p>
+              <p className="text-xs text-gray-500">統計＝區間內「賣出」的已平倉波段 · 收盤價計，未含手續費與證交稅</p>
+            </div>
             <div className="flex flex-wrap gap-1">
               {RANGES.map(r => (
                 <button key={r.label} onClick={() => setRange(r.n)}
@@ -1618,22 +1665,22 @@
             const base = raw.map(d => ({ date: d.date, close: d.close, high: d.high ?? d.close, low: d.low ?? d.close }));
             if (base.length < 150) throw new Error('加權指數資料不足 150 日（慢線 130 日需暖機）。');
 
-            // 買賣點：綠柱（負）連續收斂的第 CONV_BARS 根買進；持有時紅柱（正）連續收斂的第 CONV_BARS 根賣出。
-            // 「收斂」＝同色柱比前一根短；中途變長則重新計數。空手時不賣、持有時不重複買。
+            // 兩種買賣策略（皆以收盤價進出；持有時不重複買、空手時不賣）：
+            //  conv  新：綠柱（負）連續收斂第 3 根買進；持有時紅柱（正）連續收斂第 3 根賣出（收斂＝同色柱比前一根短，中途變長重新計數）
+            //  cross 舊：柱體由負轉正買進；由正轉負賣出
             const CONV_BARS = 3;
-            let negRun = 0, posRun = 0, holding = false;
+            let negRun = 0, posRun = 0, holdC = false, holdX = false;
             const td = calculateKD(calculateMACDCustom(base, 9, 12, 130)).map((d, i, a) => {
               const ph = i > 0 ? a[i - 1].hist : d.hist;
               negRun = (d.hist < 0 && ph < 0 && Math.abs(d.hist) < Math.abs(ph)) ? negRun + 1 : 0;
               posRun = (d.hist > 0 && ph > 0 && Math.abs(d.hist) < Math.abs(ph)) ? posRun + 1 : 0;
-              let signal = null;
-              if (!holding && negRun === CONV_BARS) { signal = 'buy'; holding = true; }
-              else if (holding && posRun === CONV_BARS) { signal = 'sell'; holding = false; }
-              return { ...d, signal };
+              let sigConv = null, sigCross = null;
+              if (!holdC && negRun === CONV_BARS) { sigConv = 'buy'; holdC = true; }
+              else if (holdC && posRun === CONV_BARS) { sigConv = 'sell'; holdC = false; }
+              if (!holdX && ph <= 0 && d.hist > 0) { sigCross = 'buy'; holdX = true; }
+              else if (holdX && ph >= 0 && d.hist < 0) { sigCross = 'sell'; holdX = false; }
+              return { ...d, sigConv, sigCross };
             });
-            const convProgress = holding
-              ? (posRun > 0 && posRun < CONV_BARS ? `持有中，紅柱已收斂 ${posRun}/${CONV_BARS} 根。` : '持有中。')
-              : (negRun > 0 && negRun < CONV_BARS ? `空手，綠柱已收斂 ${negRun}/${CONV_BARS} 根。` : '空手。');
             const n = td.length;
             const last = td[n - 1], prev = td[n - 2];
 
@@ -1659,17 +1706,24 @@
             const crossToday = (prev.k <= prev.d && last.k > last.d) ? '今日剛出現 KD 黃金交叉。'
                              : (prev.k >= prev.d && last.k < last.d) ? '今日剛出現 KD 死亡交叉。' : '';
 
-            let sigIdx = -1;
-            for (let i = n - 1; i >= 0; i--) { if (td[i].signal) { sigIdx = i; break; } }
-            const sigText = sigIdx >= 0
-              ? `最近訊號：${td[sigIdx].signal === 'buy' ? '▲買進' : '▼賣出'} ${td[sigIdx].date}（${n - 1 - sigIdx} 個交易日前）。`
-              : '';
+            const lastSig = key => {
+              let idx = -1;
+              for (let i = n - 1; i >= 0; i--) { if (td[i][key]) { idx = i; break; } }
+              return idx >= 0
+                ? `最近訊號：${td[idx][key] === 'buy' ? '▲買進' : '▼賣出'} ${td[idx].date}（${n - 1 - idx} 個交易日前）。` : '';
+            };
+            const sigInfo = {
+              conv: lastSig('sigConv') + (holdC
+                ? (posRun > 0 && posRun < CONV_BARS ? `持有中，紅柱已收斂 ${posRun}/${CONV_BARS} 根。` : '持有中。')
+                : (negRun > 0 && negRun < CONV_BARS ? `空手，綠柱已收斂 ${negRun}/${CONV_BARS} 根。` : '空手。')),
+              cross: lastSig('sigCross') + (holdX ? '持有中。' : '空手。'),
+            };
 
             setModuleData(prev => ({...prev, M11: {
               status: c.status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.hist })),
-              summary: `MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}${sigText}${convProgress}`,
-              chartTitle: '▲綠柱收斂第 3 根買進 ▼紅柱收斂第 3 根賣出 · 連線＝一個波段',
+              summary: <M11Summary info={sigInfo} base={`MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}`} />,
+              chartTitle: '▲買進 ▼賣出（依所選策略）· 連線＝一個波段',
               legend: (<>
                 <span className="text-red-400 whitespace-nowrap">▲買進</span>
                 <span className="text-green-400 whitespace-nowrap">▼賣出</span>
