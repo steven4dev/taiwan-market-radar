@@ -72,6 +72,7 @@
       AlertCircle: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"M12 8v4","M12 16h.01"]} />,
       CheckCircle2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"m9 12 2 2 4-4"]} />,
       Milestone: ({ size, className }) => <Icon size={size} className={className} d={["M12 13V2l8 4-8 4",{tag:'path',d:"M20.55 10.23A9 9 0 1 1 8 4.94"},"M8 10a5 5 0 1 0 8.9 2.02"]} />,
+      Crosshair: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},'M22 12h-4','M6 12H2','M12 6V2','M12 22v-4']} />,
       Flag: ({ size, className }) => <Icon size={size} className={className} d={["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z","M4 22v-7"]} />,
       Building2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'rect',width:'16',height:'20',x:'4',y:'2',rx:'2',ry:'2'},"M9 22v-4h6v4","M8 6h.01","M16 6h.01","M12 6h.01","M12 10h.01","M8 10h.01","M16 10h.01","M12 14h.01","M8 14h.01","M16 14h.01"]} />,
       Moon: ({ size, className }) => <Icon size={size} className={className} d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
@@ -88,11 +89,12 @@
       M3: { weight: 0.12, title: '法人動向',     icon: 'Users' },
       M4: { weight: 0.10, title: '籌碼面',       icon: 'PieChart' },
       M5: { weight: 0.04, title: '量能結構',     icon: 'BarChart2' },
-      M6: { weight: 0.10, title: '技術面',       icon: 'TrendingUp' },
+      M6: { weight: 0.06, title: '技術面',       icon: 'TrendingUp' },
       M7: { weight: 0.06, title: '外部環境',     icon: 'Globe' },
       M8: { weight: 0.08, title: '公股銀行動向', icon: 'Building2' },
       M9: { weight: 0.12, title: '夜盤動向',     icon: 'Moon' },
       M10: { weight: 0.06, title: '外資持股比重', icon: 'Flag' },
+      M11: { weight: 0.04, title: 'MACD+KD 短線時機', icon: 'Crosshair' },
     };
 
     const SCORE_LABELS = [
@@ -127,6 +129,29 @@
       res = res.map(d => ({ ...d, dif: d.ema12 - d.ema26 }));
       res = calculateEMA(res, 9, 'dif', 'macd');
       return res.map(d => ({ ...d, osc: d.dif - d.macd }));
+    };
+
+    // M11：MACD 自訂參數（DIF = EMA短 − EMA長；慢線 = DIF 的 EMA；柱體 = DIF − 慢線）
+    const calculateMACDCustom = (data, shortN, longN, signalN) => {
+      let res = calculateEMA(data, shortN, 'close', 'emaS');
+      res = calculateEMA(res, longN, 'close', 'emaL');
+      res = res.map(d => ({ ...d, dif: d.emaS - d.emaL }));
+      res = calculateEMA(res, signalN, 'dif', 'sig');
+      return res.map(d => ({ ...d, hist: d.dif - d.sig }));
+    };
+
+    // KD (9,3,3)：K、D 初值 50
+    const calculateKD = (data, n = 9) => {
+      let k = 50, d = 50;
+      return data.map((row, i) => {
+        const win = data.slice(Math.max(0, i - n + 1), i + 1);
+        const hi = Math.max(...win.map(x => x.high));
+        const lo = Math.min(...win.map(x => x.low));
+        const rsv = hi === lo ? 50 : (row.close - lo) / (hi - lo) * 100;
+        k = k * 2 / 3 + rsv / 3;
+        d = d * 2 / 3 + k / 3;
+        return { ...row, k, d };
+      });
     };
 
     const getPastDateString = (monthsAgo) => {
@@ -201,6 +226,212 @@
       );
     };
 
+    // M11 圖表：指數 + 買賣標記 / 柱體 / KD
+    const M11Chart = ({ data }) => {
+      const n = data.length;
+      if (n < 2) return null;
+      const W = 380, PH = 120, HH = 50, KH = 70, GAP = 18;
+      const H = PH + HH + KH + GAP * 2;
+      const dx = W / n;
+      const xAt = i => i * dx + dx / 2;
+
+      const closes = data.map(d => d.close);
+      const cMin = Math.min(...closes), cMax = Math.max(...closes);
+      const pad = (cMax - cMin) * 0.14 || 1;
+      const lo = cMin - pad, hi = cMax + pad;
+      const yP = v => PH - ((v - lo) / (hi - lo)) * PH;
+
+      const hY0 = PH + GAP;
+      const maxAbs = Math.max(...data.map(d => Math.abs(d.hist))) || 1;
+      const hMid = hY0 + HH / 2;
+
+      const kY0 = hY0 + HH + GAP;
+      const yK = v => kY0 + KH - (v / 100) * KH;
+
+      const path = key => data.map((d, i) => `${i ? 'L' : 'M'} ${xAt(i)} ${yK(d[key])}`).join(' ');
+      const pricePath = data.map((d, i) => `${i ? 'L' : 'M'} ${xAt(i)} ${yP(d.close)}`).join(' ');
+
+      return (
+        <svg viewBox={`0 0 ${W} ${H + 16}`} className="w-full block">
+          <text x="2" y="11" fontSize="11" fill="#6b7280">加權指數</text>
+          <path d={pricePath} fill="none" stroke="#e5e7eb" strokeWidth="1.5" strokeLinejoin="round" />
+          {data.map((d, i) => d.signal === 'buy' ? (
+            <polygon key={'b' + i} fill="#ef4444"
+              points={`${xAt(i)},${yP(d.close) + 4} ${xAt(i) - 6},${yP(d.close) + 15} ${xAt(i) + 6},${yP(d.close) + 15}`} />
+          ) : d.signal === 'sell' ? (
+            <polygon key={'s' + i} fill="#22c55e"
+              points={`${xAt(i)},${yP(d.close) - 4} ${xAt(i) - 6},${yP(d.close) - 15} ${xAt(i) + 6},${yP(d.close) - 15}`} />
+          ) : null)}
+
+          <text x="2" y={hY0 + 11} fontSize="11" fill="#6b7280">柱體 (9/12/130)</text>
+          <line x1="0" y1={hMid} x2={W} y2={hMid} stroke="#374151" strokeWidth="0.8" />
+          {data.map((d, i) => {
+            const h = Math.max(0.5, Math.abs(d.hist) / maxAbs * (HH / 2 - 2));
+            return <rect key={i} x={i * dx + dx * 0.12} y={d.hist >= 0 ? hMid - h : hMid}
+              width={dx * 0.76} height={h} fill={d.hist >= 0 ? '#ef4444' : '#22c55e'} opacity="0.85" />;
+          })}
+
+          <text x="2" y={kY0 + 11} fontSize="11" fill="#6b7280">KD (9,3,3)</text>
+          {[20, 80].map(v => (
+            <g key={v}>
+              <line x1="0" y1={yK(v)} x2={W} y2={yK(v)} stroke="#4b5563" strokeWidth="0.8" strokeDasharray="3 3" />
+              <text x={W - 2} y={yK(v) - 2} fontSize="11" fill="#6b7280" textAnchor="end">{v}</text>
+            </g>
+          ))}
+          <path d={path('d')} fill="none" stroke="#38bdf8" strokeWidth="1.3" strokeLinejoin="round" />
+          <path d={path('k')} fill="none" stroke="#facc15" strokeWidth="1.3" strokeLinejoin="round" />
+
+          <text x="0" y={H + 13} fontSize="11" fill="#6b7280">{data[0].date}</text>
+          <text x={W} y={H + 13} fontSize="11" fill="#6b7280" textAnchor="end">{data[n - 1].date}</text>
+        </svg>
+      );
+    };
+
+    // 外資持股比重 vs 加權指數（長期，雙軸各自自動縮放）
+    const ForeignLongChart = () => {
+      const { useMemo, useRef, useCallback } = React;
+      const [rows, setRows] = useState(null);
+      const [err, setErr] = useState(null);
+      const [range, setRange] = useState(1250);
+      const [hov, setHov] = useState(null);
+      const boxRef = useRef(null);
+
+      useEffect(() => {
+        (async () => {
+          try {
+            const [fh, tx] = await Promise.all([
+              fetch('./data/foreign-holding.json').then(r => { if (!r.ok) throw new Error('外資持股資料尚未建立。'); return r.json(); }),
+              fetch('./data/taiex.json').then(r => r.ok ? r.json() : []).catch(() => []),
+            ]);
+            const px = Object.fromEntries(tx.map(d => [d.date, d.close]));
+            setRows(fh.sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, index: px[d.date] ?? null })));
+          } catch (e) { setErr(e.message); }
+        })();
+      }, []);
+
+      const view = useMemo(() => (rows ? rows.slice(-range) : []), [rows, range]);
+      const n = view.length;
+
+      const onMove = useCallback(e => {
+        if (!boxRef.current || n < 2) return;
+        const rect = boxRef.current.getBoundingClientRect();
+        setHov(Math.min(n - 1, Math.max(0, Math.round(((e.clientX - rect.left) / rect.width) * (n - 1)))));
+      }, [n]);
+
+      const RANGES = [{ label: '1 年', n: 250 }, { label: '3 年', n: 750 }, { label: '5 年', n: 1250 }];
+
+      let body;
+      if (err) {
+        body = <p className="text-red-400 text-sm">{err}</p>;
+      } else if (!rows || n < 2) {
+        body = <p className="text-gray-500 text-sm text-center py-6">資料載入中...</p>;
+      } else {
+        const W = 1000, H = 300;
+        const scale = vals => {
+          const mn = Math.min(...vals), mx = Math.max(...vals);
+          const pd = (mx - mn) * 0.06 || 1;
+          return { lo: mn - pd, hi: mx + pd };
+        };
+        const rs = scale(view.map(d => d.ratio));
+        const idxVals = view.map(d => d.index).filter(v => v != null);
+        const is = idxVals.length ? scale(idxVals) : null;
+        const xAt = i => (i / (n - 1)) * W;
+        const mk = (key, sc) => {
+          let path = '', started = false;
+          view.forEach((d, i) => {
+            if (d[key] == null) return;
+            const y = H - ((d[key] - sc.lo) / (sc.hi - sc.lo)) * H;
+            path += `${started ? 'L' : 'M'} ${xAt(i).toFixed(1)} ${y.toFixed(1)} `;
+            started = true;
+          });
+          return path;
+        };
+        const fr = [0, 0.25, 0.5, 0.75, 1];
+        const first = view[0], last = view[n - 1];
+        const hiR = view.reduce((m, d) => (d.ratio > m.ratio ? d : m), view[0]);
+        const loR = view.reduce((m, d) => (d.ratio < m.ratio ? d : m), view[0]);
+        const xStep = Math.max(1, Math.floor((n - 1) / 6));
+        const xTicks = [];
+        for (let i = 0; i < n; i += xStep) xTicks.push(i);
+        const hd = hov != null ? view[hov] : null;
+        const tipLeft = hov != null && hov > n * 0.6;
+
+        body = (
+          <>
+            <p className="text-xs text-gray-400 mb-3">
+              最新 <span className="text-blue-400 font-bold">{last.ratio.toFixed(2)}%</span>（{last.date}）
+              {' · '}區間高 {hiR.ratio.toFixed(2)}%（{hiR.date}）{' · '}區間低 {loR.ratio.toFixed(2)}%（{loR.date}）
+              {n < range && <span className="text-yellow-500">{' · '}目前僅 {n} 個交易日資料</span>}
+            </p>
+            <div className="flex">
+              <div className="relative flex-shrink-0 text-xs text-blue-400 select-none" style={{ width: '3.2rem', height: H }}>
+                {fr.map(f => (
+                  <span key={f} className="absolute right-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
+                    {(rs.hi - f * (rs.hi - rs.lo)).toFixed(1)}%
+                  </span>
+                ))}
+              </div>
+              <div ref={boxRef} className="flex-1 relative cursor-crosshair" style={{ height: H }}
+                onMouseMove={onMove} onMouseLeave={() => setHov(null)}>
+                <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full block overflow-visible">
+                  {fr.map(f => (
+                    <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+                  ))}
+                  {is && <path d={mk('index', is)} fill="none" stroke="#f87171" strokeWidth="1.3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
+                  <path d={mk('ratio', rs)} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                  {hov != null && <line x1={xAt(hov)} x2={xAt(hov)} y1="0" y2={H} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
+                </svg>
+                {hd && (
+                  <div className="absolute top-2 z-10 pointer-events-none bg-gray-900/90 border border-gray-600 rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-nowrap"
+                    style={tipLeft ? { right: `${100 - (hov / (n - 1)) * 100 + 1}%` } : { left: `${(hov / (n - 1)) * 100 + 1}%` }}>
+                    <div className="text-gray-300 font-bold">{hd.date}</div>
+                    <div className="text-blue-400">外資持股占比 {hd.ratio.toFixed(2)}%</div>
+                    <div className="text-gray-300">不含台積電 {hd.exTsmc.toFixed(2)}%</div>
+                    <div className="text-red-400">加權指數 {hd.index != null ? hd.index.toLocaleString() : '—'}</div>
+                  </div>
+                )}
+              </div>
+              <div className="relative flex-shrink-0 text-xs text-red-400 select-none" style={{ width: '3.8rem', height: H }}>
+                {is && fr.map(f => (
+                  <span key={f} className="absolute left-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
+                    {Math.round(is.hi - f * (is.hi - is.lo)).toLocaleString()}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="relative text-xs text-gray-500 select-none" style={{ height: 18, marginLeft: '3.2rem', marginRight: '3.8rem' }}>
+              {xTicks.map(i => (
+                <span key={i} className="absolute whitespace-nowrap" style={{ left: `${(i / (n - 1)) * 100}%`, transform: 'translateX(-50%)' }}>
+                  {view[i].date.slice(0, 7)}
+                </span>
+              ))}
+            </div>
+          </>
+        );
+      }
+
+      return (
+        <section className="mb-8 bg-gray-800 rounded-2xl p-5 border border-gray-700 shadow-xl">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <h3 className="text-lg font-bold text-white">📈 外資持股比重 vs 加權指數（長期）</h3>
+            <div className="flex gap-1">
+              {RANGES.map(r => (
+                <button key={r.n} onClick={() => setRange(r.n)}
+                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${range === r.n ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-sm text-gray-400 mb-3">
+            <span className="text-blue-400">— 左軸：外資持股占上市總市值</span>{'　'}
+            <span className="text-red-400">- - 右軸：加權指數</span>{'　'}兩軸各自依所選區間自動縮放
+          </p>
+          {body}
+        </section>
+      );
+    };
+
     // ==========================================
     // 對齊圖表面板（單一 SVG + 準線 + Tooltip）
     // ==========================================
@@ -237,6 +468,7 @@
         { id:'M2', label:'台積電', type:'line', color:'#facc15', fmt: v => v != null ? v.toLocaleString() : '—' },
         { id:'M7', label:'SOX',   type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
         { id:'M6', label:'MACD',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? v.toFixed(1) : '—' },
+        { id:'M11', label:'柱體', type:'bar', colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? v.toFixed(0) : '—' },
         { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
         { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M10', label:'外資比', type:'line', color:'#60a5fa', fmt: v => v != null ? `${v.toFixed(2)}%` : '—' },
@@ -806,17 +1038,17 @@
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [revData, setRevData] = useState(null);
-      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null, M10:null });
+      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null, M10:null, M11:null });
       const [moduleErrors, setModuleErrors] = useState({});
-      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true });
-      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false, M10:false });
+      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true });
+      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false, M10:false, M11:false });
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
       const fetchAllData = async () => {
         setIsRefreshing(true);
         setModuleErrors({});
-        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true });
+        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true });
 
         const startDate  = getPastDateString(8);
         const recentDate = getPastDateString(3);
@@ -826,7 +1058,7 @@
           try {
             const raw = await loadWithDelta('./data/taiex.json',
               start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || getPastDateString(5))
-                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, volume: d.Trading_Volume }))));
+                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, high: d.max, low: d.min, volume: d.Trading_Volume }))));
             const taiexData = raw.map(d => ({ date: d.date, close: d.close, open: d.open }));
             if (taiexData.length < 20) throw new Error('TAIEX 資料不足以判斷分水嶺');
 
@@ -1069,7 +1301,7 @@
           try {
             const raw = await loadWithDelta('./data/taiex.json',
               start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || startDate)
-                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, volume: d.Trading_Volume }))));
+                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, high: d.max, low: d.min, volume: d.Trading_Volume }))));
             const fmt = raw.map(d => ({ date:d.date, close:d.close, volume:(d.volume||d.Trading_Volume||0)/1e8, open:d.open }));
             let td = calculateSMA(fmt, 60);
             td = calculateSMA(td, 120);
@@ -1244,12 +1476,76 @@
           finally    { setModuleLoading(prev => ({...prev, M8:false})); }
         };
 
+        // M11 MACD(9/12/130) + KD(9,3,3) 短線時機
+        const processM11 = async () => {
+          try {
+            const raw = await loadWithDelta('./data/taiex.json',
+              start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || getPastDateString(5))
+                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, high: d.max, low: d.min, volume: d.Trading_Volume }))));
+            const base = raw.map(d => ({ date: d.date, close: d.close, high: d.high ?? d.close, low: d.low ?? d.close }));
+            if (base.length < 150) throw new Error('加權指數資料不足 150 日（慢線 130 日需暖機）。');
+
+            const td = calculateKD(calculateMACDCustom(base, 9, 12, 130)).map((d, i, a) => ({
+              ...d,
+              signal: i === 0 ? null
+                : (a[i - 1].hist <= 0 && d.hist > 0) ? 'buy'
+                : (a[i - 1].hist >= 0 && d.hist < 0) ? 'sell' : null,
+            }));
+            const n = td.length;
+            const last = td[n - 1], prev = td[n - 2];
+
+            const histPos   = last.hist > 0;
+            const expanding = Math.abs(last.hist) > Math.abs(prev.hist);
+            const kAbove    = last.k > last.d;
+
+            // 教學四象限（正增強+黃金 / 正減弱+死亡 / 負增強+死亡 / 負減弱+黃金）；其餘四種歸中立
+            const CASES = {
+              PEG: { status: 'green',  text: '短線轉強：柱體正向增強且 K 在 D 上方' },
+              PSD: { status: 'yellow', text: '動能降溫：柱體正向減弱且 K 在 D 下方' },
+              NED: { status: 'red',    text: '下跌風險：柱體負向增強且 K 在 D 下方，留意柱體是否變更長' },
+              NSG: { status: 'yellow', text: '止跌觀察：柱體負向減弱且 K 在 D 上方，觀察是否逐步止跌' },
+              PED: { status: 'yellow', text: '多頭中的短線回檔：柱體正向增強但 K 在 D 下方' },
+              PSG: { status: 'yellow', text: '多方動能轉弱：柱體正向減弱，K 仍在 D 上方' },
+              NEG: { status: 'yellow', text: '空頭中的反彈：柱體負向增強，但 K 在 D 上方' },
+              NSD: { status: 'yellow', text: '空方動能減弱：柱體負向減弱，K 仍在 D 下方' },
+            };
+            const c = CASES[`${histPos ? 'P' : 'N'}${expanding ? 'E' : 'S'}${kAbove ? 'G' : 'D'}`];
+
+            const zone = last.k < 20 ? 'K 值位於超賣區（<20），留意指標鈍化。'
+                       : last.k > 80 ? 'K 值位於超買區（>80），留意指標鈍化。' : '';
+            const crossToday = (prev.k <= prev.d && last.k > last.d) ? '今日剛出現 KD 黃金交叉。'
+                             : (prev.k >= prev.d && last.k < last.d) ? '今日剛出現 KD 死亡交叉。' : '';
+
+            let sigIdx = -1;
+            for (let i = n - 1; i >= 0; i--) { if (td[i].signal) { sigIdx = i; break; } }
+            const sigText = sigIdx >= 0
+              ? `最近訊號：${td[sigIdx].signal === 'buy' ? '▲買進' : '▼賣出'} ${td[sigIdx].date}（${n - 1 - sigIdx} 個交易日前）。`
+              : '';
+
+            const view = td.slice(-120);
+            setModuleData(prev => ({...prev, M11: {
+              status: c.status,
+              alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.hist })),
+              summary: `MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}${sigText}`,
+              chartTitle: '加權指數 / 柱體 / KD（近 120 日）· ▲柱體負轉正 ▼柱體正轉負',
+              legend: (<>
+                <span className="text-red-400 whitespace-nowrap">▲買進</span>
+                <span className="text-green-400 whitespace-nowrap">▼賣出</span>
+                <span className="text-yellow-400 whitespace-nowrap">K</span>
+                <span className="text-sky-400 whitespace-nowrap">D</span>
+              </>),
+              renderChart: () => <M11Chart data={view} />,
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M11:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M11:false})); }
+        };
+
         // M10 外資持股比重（外資持股市值 ÷ 上市總市值，TWSE 每日盤後公布）
         const processM10 = async () => {
           try {
             const res = await fetch('./data/foreign-holding.json');
             if (!res.ok) throw new Error('外資持股資料尚未建立。');
-            const series = (await res.json()).sort((a, b) => a.date.localeCompare(b.date));
+            const series = (await res.json()).sort((a, b) => a.date.localeCompare(b.date)).slice(-250);
             if (series.length < 21) throw new Error('外資持股資料不足 21 日。');
 
             const n = series.length;
@@ -1397,7 +1693,7 @@
           finally    { setModuleLoading(prev => ({...prev, M9:false})); }
         };
 
-        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processM10(), processRevenue()]);
+        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processM10(), processM11(), processRevenue()]);
 
         const now = new Date();
         setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
@@ -1430,7 +1726,7 @@
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
       const handleToggleAll = () => {
         const v = !isAllExpanded;
-        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v, M10:v });
+        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v, M10:v, M11:v });
       };
 
       const score = calculateScore();
@@ -1560,6 +1856,9 @@
 
             {/* 對齊圖表面板 */}
             <div className="mt-6"><AlignedChartPanel moduleData={moduleData} /></div>
+
+            {/* 外資持股比重 長期對比 */}
+            <div className="mt-6"><ForeignLongChart /></div>
 
             {/* 錯誤提示 */}
             {Object.values(moduleErrors).some(Boolean) && (

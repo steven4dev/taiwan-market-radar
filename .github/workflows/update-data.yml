@@ -88,7 +88,7 @@ jobs:
             const merged     = [
               ...existing,
               ...raw.filter(r => !existDates.has(r.date))
-                   .map(r => ({ date: r.date, close: r.close, open: r.open, volume: r.Trading_Volume }))
+                   .map(r => ({ date: r.date, close: r.close, open: r.open, high: r.max, low: r.min, volume: r.Trading_Volume }))
             ].sort((a, b) => a.date.localeCompare(b.date));
             writeJSON('data/taiex.json', merged);
             console.log(`taiex: ${merged.length} records, latest: ${merged.at(-1).date}`);

@@ -8,6 +8,7 @@
 用法：
   python3 scripts/foreign_holding.py            # 補齊缺的交易日（最近 250 日內）
   python3 scripts/foreign_holding.py --days 60  # 只看最近 60 個交易日
+  python3 scripts/foreign_holding.py --since 2021-11-01  # 回補到指定日期（由新到舊）
 """
 import argparse, json, os, subprocess, sys, time
 
@@ -90,6 +91,7 @@ def compute(date):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--days', type=int, default=250)
+    ap.add_argument('--since', help='YYYY-MM-DD，指定時忽略 --days')
     args = ap.parse_args()
 
     existing = []
@@ -98,8 +100,9 @@ def main():
     have = {r['date'] for r in existing}
 
     taiex = json.load(open(TAIEX, encoding='utf-8'))
-    dates = sorted({r['date'] for r in taiex})[-args.days:]
-    todo = [d for d in dates if d not in have]
+    dates = sorted({r['date'] for r in taiex})
+    dates = [d for d in dates if d >= args.since] if args.since else dates[-args.days:]
+    todo = sorted((d for d in dates if d not in have), reverse=True)
     print(f'foreign-holding: {len(have)} 筆已有，待補 {len(todo)} 日', flush=True)
 
     added = 0
