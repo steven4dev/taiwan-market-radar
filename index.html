@@ -1523,12 +1523,22 @@
             const base = raw.map(d => ({ date: d.date, close: d.close, high: d.high ?? d.close, low: d.low ?? d.close }));
             if (base.length < 150) throw new Error('加權指數資料不足 150 日（慢線 130 日需暖機）。');
 
-            const td = calculateKD(calculateMACDCustom(base, 9, 12, 130)).map((d, i, a) => ({
-              ...d,
-              signal: i === 0 ? null
-                : (a[i - 1].hist <= 0 && d.hist > 0) ? 'buy'
-                : (a[i - 1].hist >= 0 && d.hist < 0) ? 'sell' : null,
-            }));
+            // 買賣點：綠柱（負）連續收斂的第 CONV_BARS 根買進；持有時紅柱（正）連續收斂的第 CONV_BARS 根賣出。
+            // 「收斂」＝同色柱比前一根短；中途變長則重新計數。空手時不賣、持有時不重複買。
+            const CONV_BARS = 3;
+            let negRun = 0, posRun = 0, holding = false;
+            const td = calculateKD(calculateMACDCustom(base, 9, 12, 130)).map((d, i, a) => {
+              const ph = i > 0 ? a[i - 1].hist : d.hist;
+              negRun = (d.hist < 0 && ph < 0 && Math.abs(d.hist) < Math.abs(ph)) ? negRun + 1 : 0;
+              posRun = (d.hist > 0 && ph > 0 && Math.abs(d.hist) < Math.abs(ph)) ? posRun + 1 : 0;
+              let signal = null;
+              if (!holding && negRun === CONV_BARS) { signal = 'buy'; holding = true; }
+              else if (holding && posRun === CONV_BARS) { signal = 'sell'; holding = false; }
+              return { ...d, signal };
+            });
+            const convProgress = holding
+              ? (posRun > 0 && posRun < CONV_BARS ? `持有中，紅柱已收斂 ${posRun}/${CONV_BARS} 根。` : '持有中。')
+              : (negRun > 0 && negRun < CONV_BARS ? `空手，綠柱已收斂 ${negRun}/${CONV_BARS} 根。` : '空手。');
             const n = td.length;
             const last = td[n - 1], prev = td[n - 2];
 
@@ -1582,8 +1592,8 @@
             setModuleData(prev => ({...prev, M11: {
               status: c.status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.hist })),
-              summary: `MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}${sigText}`,
-              chartTitle: '近 120 日 · ▲柱體負轉正 ▼柱體正轉負 · 連線＝一個波段（收盤價計，未含費稅）',
+              summary: `MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}${sigText}${convProgress}`,
+              chartTitle: '近 120 日 · ▲綠柱收斂第 3 根買進 ▼紅柱收斂第 3 根賣出 · 連線＝一個波段（收盤價計，未含費稅）',
               legend: (<>
                 <span className="text-red-400 whitespace-nowrap">▲買進</span>
                 <span className="text-green-400 whitespace-nowrap">▼賣出</span>
