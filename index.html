@@ -230,7 +230,7 @@
     };
 
     // M11 圖表：指數 + 買賣標記 / 柱體 / KD
-    const M11Chart = ({ data }) => {
+    const M11Chart = ({ data, trades = [] }) => {
       const n = data.length;
       if (n < 2) return null;
       const W = 380, PH = 120, HH = 50, KH = 70, GAP = 18;
@@ -258,6 +258,31 @@
         <svg viewBox={`0 0 ${W} ${H + 16}`} className="w-full block">
           <text x="2" y="11" fontSize="11" fill="#6b7280">加權指數</text>
           <path d={pricePath} fill="none" stroke="#e5e7eb" strokeWidth="1.5" strokeLinejoin="round" />
+          {trades.map((t, k) => {
+            const up = t.ret >= 0;
+            const col = up ? '#ef4444' : '#22c55e';
+            const mag = Math.abs(t.ret);
+            const w = mag >= 6 ? 3.4 : mag >= 2 ? 2.6 : 1.9;
+            const x0 = xAt(t.a), y0 = yP(t.pa), x1 = xAt(t.b), y1 = yP(t.pb);
+            const label = `${up ? '+' : ''}${t.ret.toFixed(1)}%`;
+            const lw = label.length * 6 + 8;
+            const lx = (x0 + x1) / 2, ly = Math.max(2, (y0 + y1) / 2 - 22);
+            return (
+              <g key={'t' + k}>
+                <title>{`${t.open ? '持有中' : '已平倉'}：▲ ${t.d0} 收 ${t.p0.toLocaleString()} → ${t.open ? '最新' : '▼ ' + t.d1} 收 ${t.p1.toLocaleString()}，${label}（以收盤價計，未含手續費與稅）`}</title>
+                <line x1={x0} y1={y0} x2={x1} y2={y1} stroke={col} strokeWidth={w} strokeLinecap="round"
+                  strokeDasharray={t.open ? '0.1 5.5' : '7 4'} opacity="0.95" />
+                {!t.clipped && <circle cx={x0} cy={y0} r="3" fill={col} stroke="#111827" strokeWidth="1.2" />}
+                <circle cx={x1} cy={y1} r="3" fill={t.open ? '#111827' : col} stroke={t.open ? col : '#111827'} strokeWidth={t.open ? 1.8 : 1.2} />
+                {x1 - x0 >= 36 && (
+                  <g>
+                    <rect x={lx - lw / 2} y={ly} width={lw} height="14" rx="3" fill="#111827" fillOpacity="0.88" stroke={col} strokeOpacity="0.6" strokeWidth="0.8" />
+                    <text x={lx} y={ly + 10.5} fontSize="10" fill={col} textAnchor="middle" fontWeight="600">{label}</text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
           {data.map((d, i) => d.signal === 'buy' ? (
             <polygon key={'b' + i} fill="#ef4444"
               points={`${xAt(i)},${yP(d.close) + 4} ${xAt(i) - 6},${yP(d.close) + 15} ${xAt(i) + 6},${yP(d.close) + 15}`} />
@@ -1013,7 +1038,7 @@
             <div className="mt-5 pt-5 border-t border-gray-700 animate-in">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs text-gray-500">{data.chartTitle || '近期趨勢'}</p>
-                {data.legend && <div className="text-xs flex gap-3">{data.legend}</div>}
+                {data.legend && <div className="text-xs flex flex-wrap justify-end gap-x-3 gap-y-1">{data.legend}</div>}
               </div>
               {data.renderChart ? data.renderChart() : <div className="text-gray-500 text-xs">圖表建置中</div>}
             </div>
@@ -1534,18 +1559,38 @@
               : '';
 
             const view = td.slice(-120);
+            const viewStart = n - view.length;
+
+            // 波段：▲買進 → 下一個 ▼賣出；尚未賣出者為持有中（算到最新收盤）。以訊號日收盤價計。
+            const rawTrades = [];
+            let openIdx = null;
+            td.forEach((d, i) => {
+              if (d.signal === 'buy') openIdx = i;
+              else if (d.signal === 'sell' && openIdx != null) { rawTrades.push({ i0: openIdx, i1: i, open: false }); openIdx = null; }
+            });
+            if (openIdx != null) rawTrades.push({ i0: openIdx, i1: n - 1, open: true });
+
+            const trades = rawTrades.filter(t => t.i1 >= viewStart).map(t => {
+              const p0 = td[t.i0].close, p1 = td[t.i1].close;
+              let a = t.i0 - viewStart, pa = p0, clipped = false;
+              if (a < 0) { pa = p0 + (p1 - p0) * (-a) / (t.i1 - t.i0); a = 0; clipped = true; }
+              return { a, b: t.i1 - viewStart, pa, pb: p1, p0, p1, ret: (p1 / p0 - 1) * 100,
+                       open: t.open, clipped, d0: td[t.i0].date, d1: td[t.i1].date };
+            });
             setModuleData(prev => ({...prev, M11: {
               status: c.status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.hist })),
               summary: `MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}${sigText}`,
-              chartTitle: '加權指數 / 柱體 / KD（近 120 日）· ▲柱體負轉正 ▼柱體正轉負',
+              chartTitle: '近 120 日 · ▲柱體負轉正 ▼柱體正轉負 · 連線＝一個波段（收盤價計，未含費稅）',
               legend: (<>
                 <span className="text-red-400 whitespace-nowrap">▲買進</span>
                 <span className="text-green-400 whitespace-nowrap">▼賣出</span>
+                <span className="text-red-400 whitespace-nowrap">┄獲利</span>
+                <span className="text-green-400 whitespace-nowrap">┄虧損</span>
                 <span className="text-yellow-400 whitespace-nowrap">K</span>
                 <span className="text-sky-400 whitespace-nowrap">D</span>
               </>),
-              renderChart: () => <M11Chart data={view} />,
+              renderChart: () => <M11Chart data={view} trades={trades} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M11:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M11:false})); }
