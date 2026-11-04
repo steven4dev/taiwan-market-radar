@@ -204,6 +204,10 @@ jobs:
           })();
           SCRIPT
 
+      - name: Update foreign holding (M10)
+        continue-on-error: true
+        run: python3 scripts/foreign_holding.py --days 10
+
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"

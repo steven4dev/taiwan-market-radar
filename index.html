@@ -72,6 +72,7 @@
       AlertCircle: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"M12 8v4","M12 16h.01"]} />,
       CheckCircle2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'circle',cx:'12',cy:'12',r:'10'},"m9 12 2 2 4-4"]} />,
       Milestone: ({ size, className }) => <Icon size={size} className={className} d={["M12 13V2l8 4-8 4",{tag:'path',d:"M20.55 10.23A9 9 0 1 1 8 4.94"},"M8 10a5 5 0 1 0 8.9 2.02"]} />,
+      Flag: ({ size, className }) => <Icon size={size} className={className} d={["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z","M4 22v-7"]} />,
       Building2: ({ size, className }) => <Icon size={size} className={className} d={[{tag:'rect',width:'16',height:'20',x:'4',y:'2',rx:'2',ry:'2'},"M9 22v-4h6v4","M8 6h.01","M16 6h.01","M12 6h.01","M12 10h.01","M8 10h.01","M16 10h.01","M12 14h.01","M8 14h.01","M16 14h.01"]} />,
       Moon: ({ size, className }) => <Icon size={size} className={className} d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
     };
@@ -84,13 +85,14 @@
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
       M2: { weight: 0.16, title: '權值股健康度', icon: 'Activity' },
-      M3: { weight: 0.16, title: '法人動向',     icon: 'Users' },
+      M3: { weight: 0.12, title: '法人動向',     icon: 'Users' },
       M4: { weight: 0.10, title: '籌碼面',       icon: 'PieChart' },
-      M5: { weight: 0.06, title: '量能結構',     icon: 'BarChart2' },
+      M5: { weight: 0.04, title: '量能結構',     icon: 'BarChart2' },
       M6: { weight: 0.10, title: '技術面',       icon: 'TrendingUp' },
       M7: { weight: 0.06, title: '外部環境',     icon: 'Globe' },
       M8: { weight: 0.08, title: '公股銀行動向', icon: 'Building2' },
       M9: { weight: 0.12, title: '夜盤動向',     icon: 'Moon' },
+      M10: { weight: 0.06, title: '外資持股比重', icon: 'Flag' },
     };
 
     const SCORE_LABELS = [
@@ -167,7 +169,7 @@
         <div className="relative w-full overflow-hidden text-xs" style={{ height }}>
           <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
             {lines.map((line, i) => (
-              <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" />
+              <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" strokeDasharray={line.dash} />
             ))}
           </svg>
           <div className="absolute top-0 left-0 text-gray-500 bg-gray-900/50 px-1 rounded">{max.toFixed(2)}</div>
@@ -237,6 +239,7 @@
         { id:'M6', label:'MACD',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? v.toFixed(1) : '—' },
         { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
         { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
+        { id:'M10', label:'外資比', type:'line', color:'#60a5fa', fmt: v => v != null ? `${v.toFixed(2)}%` : '—' },
         { id:'M4', label:'融資',  type:'line', color:'#c084fc', fmt: v => v != null ? `${Math.round(v)}億` : '—' },
         { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
@@ -803,17 +806,17 @@
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [revData, setRevData] = useState(null);
-      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null });
+      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null, M10:null });
       const [moduleErrors, setModuleErrors] = useState({});
-      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true });
-      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false });
+      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true });
+      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false, M10:false });
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
       const fetchAllData = async () => {
         setIsRefreshing(true);
         setModuleErrors({});
-        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true });
+        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true });
 
         const startDate  = getPastDateString(8);
         const recentDate = getPastDateString(3);
@@ -1241,6 +1244,71 @@
           finally    { setModuleLoading(prev => ({...prev, M8:false})); }
         };
 
+        // M10 外資持股比重（外資持股市值 ÷ 上市總市值，TWSE 每日盤後公布）
+        const processM10 = async () => {
+          try {
+            const res = await fetch('./data/foreign-holding.json');
+            if (!res.ok) throw new Error('外資持股資料尚未建立。');
+            const series = (await res.json()).sort((a, b) => a.date.localeCompare(b.date));
+            if (series.length < 21) throw new Error('外資持股資料不足 21 日。');
+
+            const n = series.length;
+            const latest = series[n - 1];
+            const d5  = latest.ratio - series[n - 6].ratio;
+            const d20 = latest.ratio - series[n - 21].ratio;
+            const d60 = n > 60 ? latest.ratio - series[n - 61].ratio : null;
+            const x20 = latest.exTsmc - series[n - 21].exTsmc;
+
+            const ratios = series.map(d => d.ratio);
+            const rMin = Math.min(...ratios), rMax = Math.max(...ratios);
+            const pos = rMax > rMin ? Math.round((latest.ratio - rMin) / (rMax - rMin) * 100) : 50;
+
+            let status = 'yellow';
+            if (d20 > 0 && d5 > 0) status = 'green';
+            if (d20 <= -1) status = 'red';
+
+            const sg = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}`;
+
+            // 加權指數等比例縮放到持股比重區間，疊在同一張圖看背離
+            let taiexMap = {};
+            try {
+              const tr = await fetch('./data/taiex.json');
+              if (tr.ok) (await tr.json()).forEach(d => { taiexMap[d.date] = d.close; });
+            } catch(e) {}
+            const closes = series.map(d => taiexMap[d.date]).filter(v => v != null);
+            const cMin = Math.min(...closes), cMax = Math.max(...closes);
+            const chartData = series.map(d => ({
+              date: d.date,
+              ratio: d.ratio,
+              index: taiexMap[d.date] != null && cMax > cMin
+                ? rMin + (taiexMap[d.date] - cMin) / (cMax - cMin) * (rMax - rMin)
+                : null,
+            }));
+
+            setModuleData(prev => ({...prev, M10: {
+              status,
+              alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.ratio })),
+              summary: `外資持股占上市總市值 ${latest.ratio.toFixed(2)}%（不含台積電 ${latest.exTsmc.toFixed(2)}%）。近 20 日 ${sg(d20)}pp、近 5 日 ${sg(d5)}pp${d60 != null ? `、近 60 日 ${sg(d60)}pp` : ''}，位於近 ${n} 日區間的 ${pos}% 位置。持股 ≥50% 的個股 ${latest.over50} 檔。${status === 'green' ? '外資持股比重回升，籌碼面偏多。' : status === 'red' ? '外資持股比重明顯下降（近 20 日降逾 1pp），若指數同步在高檔屬背離，需提高警覺。' : '外資持股比重變動不大，方向未明。'}`,
+              chartTitle: `外資持股占上市總市值（近 ${n} 日，%）`,
+              legend: (<>
+                <span className="text-blue-400">— 持股比重</span>
+                <span className="text-red-400">- - 加權指數（等比例縮放）</span>
+              </>),
+              renderChart: () => (
+                <SvgLineChart
+                  data={chartData}
+                  lines={[
+                    { key: 'ratio', color: '#60a5fa', width: '2' },
+                    { key: 'index', color: '#f87171', width: '1.5', dash: '4 3' },
+                  ]}
+                  height={150}
+                />
+              ),
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M10:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M10:false})); }
+        };
+
         // 台積電月營收（下車警示 Signal 2）
         const processRevenue = async () => {
           try {
@@ -1329,7 +1397,7 @@
           finally    { setModuleLoading(prev => ({...prev, M9:false})); }
         };
 
-        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processRevenue()]);
+        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processM10(), processRevenue()]);
 
         const now = new Date();
         setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
@@ -1362,7 +1430,7 @@
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
       const handleToggleAll = () => {
         const v = !isAllExpanded;
-        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v });
+        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v, M10:v });
       };
 
       const score = calculateScore();
