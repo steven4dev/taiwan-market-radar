@@ -215,7 +215,8 @@
           <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
             <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="#4b5563" strokeWidth="1" strokeDasharray="4 4" />
             {data.map((d, i) => {
-              const val = d[dataKey] || 0;
+              if (!Number.isFinite(d[dataKey])) return null; // 無資料（如 volume 未回填）不畫零高度長條
+              const val = d[dataKey];
               const barH = (Math.abs(val) / max) * (height / 2);
               const x = i * (barW + spacing);
               const y = val >= 0 ? height / 2 - barH : height / 2;
@@ -1305,13 +1306,19 @@
             const fmt = raw.map(d => ({ date:d.date, close:d.close, volume:(d.volume||d.Trading_Volume||0)/1e8, open:d.open }));
             let td = calculateSMA(fmt, 60);
             td = calculateSMA(td, 120);
-            td = calculateSMA(td, 10, 'volume');
             td = calculateMACD(td);
 
-            const last = td[td.length-1];
-            const prev = td[td.length-2];
-            const volRatio = last.volume / last.sma10;
-            const priceUp  = last.close > prev.close;
+            // 成交量：略過 volume=0（盤中/尚未回填/歷史缺漏）的列；十日均量只用 volume>0 的交易日
+            const vd = calculateSMA(td.filter(d => d.volume > 0), 10, 'volume');
+            const smaByDate = new Map(vd.map(d => [d.date, d.sma10]));
+            const volTd = td.map(d => ({ ...d, volume: d.volume > 0 ? d.volume : null, sma10: smaByDate.get(d.date) ?? null }));
+
+            const last = td[td.length-1];   // M6 仍以最新一列（收盤價）計算
+            const lastVol = vd[vd.length-1];
+            const lastVolIdx = td.findIndex(d => d.date === lastVol.date);
+            const prevVol = td[lastVolIdx-1] || td[lastVolIdx];
+            const volRatio = lastVol.volume / lastVol.sma10;
+            const priceUp  = lastVol.close > prevVol.close;
 
             let m4Status = 'yellow';
             if (volRatio > 1.2 && priceUp)  m4Status = 'green';
@@ -1319,10 +1326,10 @@
 
             setModuleData(p => ({...p, M5: {
               status: m4Status,
-              alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.volume })),
-              summary: `大盤今日成交量約 ${Math.round(last.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
+              alignedData: volTd.slice(-60).map(d => ({ date: d.date, value: d.volume })),
+              summary: `大盤最近有量交易日（${lastVol.date}${lastVol.date !== last.date ? '，最新一日成交量尚未回填' : ''}）成交量約 ${Math.round(lastVol.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
               chartTitle: '加權指數成交量（近 60 日，億）',
-              renderChart: () => <SvgBarChart data={td.slice(-60)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
+              renderChart: () => <SvgBarChart data={volTd.slice(-60)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
             }}));
 
             const over60  = last.close > last.sma60;
