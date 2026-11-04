@@ -317,6 +317,101 @@
       );
     };
 
+    // M11 面板：區間切換 + 勝率/輸贏統計 + 圖表
+    const M11Panel = ({ td }) => {
+      const { useMemo } = React;
+      const [range, setRange] = useState(120);
+      const WARM = 140;                       // 慢線 EMA130 暖機期，其前的訊號不計
+      const n = td.length;
+      const RANGES = [
+        { label: '近 60 日', n: 60 }, { label: '近 120 日', n: 120 }, { label: '近 1 年', n: 250 },
+        { label: '近 3 年', n: 750 }, { label: '全部', n: n - WARM },
+      ];
+      const size = Math.max(2, Math.min(range, n - WARM));
+
+      const { view, trades, stats, openTrade } = useMemo(() => {
+        const viewStart = n - size;
+        const raw = [];
+        let oi = null;
+        td.forEach((d, i) => {
+          if (d.signal === 'buy') oi = i;
+          else if (d.signal === 'sell' && oi != null) { raw.push({ i0: oi, i1: i, open: false }); oi = null; }
+        });
+        if (oi != null) raw.push({ i0: oi, i1: n - 1, open: true });
+
+        const trades = raw.filter(t => t.i0 >= WARM && t.i1 >= viewStart).map(t => {
+          const p0 = td[t.i0].close, p1 = td[t.i1].close;
+          let a = t.i0 - viewStart, pa = p0, clipped = false;
+          if (a < 0) { pa = p0 + (p1 - p0) * (-a) / (t.i1 - t.i0); a = 0; clipped = true; }
+          return { a, b: t.i1 - viewStart, pa, pb: p1, p0, p1, ret: (p1 / p0 - 1) * 100,
+                   open: t.open, clipped, d0: td[t.i0].date, d1: td[t.i1].date };
+        });
+
+        const rets = trades.filter(t => !t.open).map(t => t.ret);
+        const wins = rets.filter(r => r > 0), losses = rets.filter(r => r <= 0);
+        const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+        const stats = rets.length ? {
+          count: rets.length, wins: wins.length, losses: losses.length,
+          winRate: wins.length / rets.length * 100,
+          avgWin: avg(wins), avgLoss: avg(losses),
+          total: (rets.reduce((e, r) => e * (1 + r / 100), 1) - 1) * 100,
+          best: Math.max(...rets), worst: Math.min(...rets),
+        } : null;
+        return { view: td.slice(viewStart), trades, stats, openTrade: trades.find(t => t.open) || null };
+      }, [td, size]);
+
+      const sg = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
+      const rc = v => (v == null ? 'text-gray-400' : v > 0 ? 'text-red-400' : 'text-green-400');
+      const tile = (label, value, sub) => (
+        <div key={label} className="bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2">
+          <p className="text-[11px] text-gray-500">{label}</p>
+          <p className="text-base font-bold text-white leading-snug">{value}</p>
+          <p className="text-[11px] text-gray-400">{sub}</p>
+        </div>
+      );
+
+      return (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="text-xs text-gray-500">統計＝區間內「賣出」的已平倉波段 · 收盤價計，未含手續費與證交稅</p>
+            <div className="flex flex-wrap gap-1">
+              {RANGES.map(r => (
+                <button key={r.label} onClick={() => setRange(r.n)}
+                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${range === r.n ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {stats ? (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
+              {tile('已平倉', `${stats.count} 次`,
+                <><span className="text-red-400">獲利 {stats.wins}</span>{' · '}<span className="text-green-400">虧損 {stats.losses}</span></>)}
+              {tile('勝率', `${stats.winRate.toFixed(0)}%`,
+                stats.avgWin != null && stats.avgLoss != null && stats.avgLoss < 0
+                  ? `盈虧比 ${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2)}` : '盈虧比 —')}
+              {tile('平均每筆',
+                <span className="text-sm"><span className={rc(stats.avgWin)}>{sg(stats.avgWin)}</span>{' / '}<span className={rc(stats.avgLoss)}>{sg(stats.avgLoss)}</span></span>,
+                '平均獲利 / 平均虧損')}
+              {tile('累計報酬', <span className={rc(stats.total)}>{sg(stats.total)}</span>, '各波段依序複利')}
+              {tile('單筆極值',
+                <span className="text-sm"><span className={rc(stats.best)}>{sg(stats.best)}</span>{' / '}<span className={rc(stats.worst)}>{sg(stats.worst)}</span></span>,
+                '最佳 / 最差')}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 mb-2">此區間內尚無已平倉波段。</p>
+          )}
+          <p className="text-xs text-gray-400 mb-3">
+            {openTrade
+              ? <>目前持有中：▲ {openTrade.d0} 進場，未實現 <span className={rc(openTrade.ret)}>{sg(openTrade.ret)}</span>（不計入上列統計）。</>
+              : '目前空手。'}
+          </p>
+          <div className="md:hidden"><M11Chart data={view} trades={trades} /></div>
+          <div className="hidden md:block"><M11Chart data={view} trades={trades} wide /></div>
+        </>
+      );
+    };
+
     // M12 圖表：外資持股比重 vs 加權指數（長期，雙軸各自自動縮放）
     const ForeignLongChart = ({ rows }) => {
       const { useMemo, useRef, useCallback } = React;
@@ -1570,30 +1665,11 @@
               ? `最近訊號：${td[sigIdx].signal === 'buy' ? '▲買進' : '▼賣出'} ${td[sigIdx].date}（${n - 1 - sigIdx} 個交易日前）。`
               : '';
 
-            const view = td.slice(-120);
-            const viewStart = n - view.length;
-
-            // 波段：▲買進 → 下一個 ▼賣出；尚未賣出者為持有中（算到最新收盤）。以訊號日收盤價計。
-            const rawTrades = [];
-            let openIdx = null;
-            td.forEach((d, i) => {
-              if (d.signal === 'buy') openIdx = i;
-              else if (d.signal === 'sell' && openIdx != null) { rawTrades.push({ i0: openIdx, i1: i, open: false }); openIdx = null; }
-            });
-            if (openIdx != null) rawTrades.push({ i0: openIdx, i1: n - 1, open: true });
-
-            const trades = rawTrades.filter(t => t.i1 >= viewStart).map(t => {
-              const p0 = td[t.i0].close, p1 = td[t.i1].close;
-              let a = t.i0 - viewStart, pa = p0, clipped = false;
-              if (a < 0) { pa = p0 + (p1 - p0) * (-a) / (t.i1 - t.i0); a = 0; clipped = true; }
-              return { a, b: t.i1 - viewStart, pa, pb: p1, p0, p1, ret: (p1 / p0 - 1) * 100,
-                       open: t.open, clipped, d0: td[t.i0].date, d1: td[t.i1].date };
-            });
             setModuleData(prev => ({...prev, M11: {
               status: c.status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.hist })),
               summary: `MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}${sigText}${convProgress}`,
-              chartTitle: '近 120 日 · ▲綠柱收斂第 3 根買進 ▼紅柱收斂第 3 根賣出 · 連線＝一個波段（收盤價計，未含費稅）',
+              chartTitle: '▲綠柱收斂第 3 根買進 ▼紅柱收斂第 3 根賣出 · 連線＝一個波段',
               legend: (<>
                 <span className="text-red-400 whitespace-nowrap">▲買進</span>
                 <span className="text-green-400 whitespace-nowrap">▼賣出</span>
@@ -1602,10 +1678,7 @@
                 <span className="text-yellow-400 whitespace-nowrap">K</span>
                 <span className="text-sky-400 whitespace-nowrap">D</span>
               </>),
-              renderChart: () => (<>
-                <div className="md:hidden"><M11Chart data={view} trades={trades} /></div>
-                <div className="hidden md:block"><M11Chart data={view} trades={trades} wide /></div>
-              </>),
+              renderChart: () => <M11Panel td={td} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M11:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M11:false})); }
