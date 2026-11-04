@@ -478,13 +478,13 @@
         { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
       ];
 
-      // 只保留有資料的列
+      // 每個模組都保留一列；沒有資料的列標示「無資料」
       const rows = ROWS_DEF.map(r => {
         const ad = moduleData[r.id]?.alignedData;
-        if (!ad || ad.length === 0) return null;
+        const vals = (ad || []).map(p => p.value).filter(v => v != null && isFinite(v));
+        if (!ad || ad.length === 0 || !vals.length)
+          return { ...r, empty: true, byDate: {}, vals: [], maxAbs: 1, lineMin: 0, lineMax: 1, lineRange: 1 };
         const byDate = Object.fromEntries(ad.map(p => [p.date, p.value]));
-        const vals = ad.map(p => p.value).filter(v => v != null && isFinite(v));
-        if (!vals.length) return null;
         const maxAbs = r.type === 'bar' ? (Math.max(...vals.map(v => Math.abs(v))) * 1.1 || 1) : null;
         const lineMin = r.type === 'line' ? Math.min(...vals) : null;
         const lineMax = r.type === 'line' ? Math.max(...vals) : null;
@@ -546,6 +546,11 @@
                 {rows.map((r, ri) => {
                   const yBase = ri * ROW_H;
                   const mid = yBase + ROW_H / 2;
+                  if (r.empty) return (
+                    <g key={r.id}>
+                      <line x1="0" y1={mid} x2={W} y2={mid} stroke="#374151" strokeWidth="0.6" strokeDasharray="6 6" />
+                    </g>
+                  );
                   return (
                     <g key={r.id}>
                       {r.type === 'bar'
@@ -619,6 +624,14 @@
                   </>
                 )}
               </svg>
+
+              {rows.map((r, ri) => r.empty ? (
+                <div key={'empty-' + r.id}
+                  className="absolute left-0 right-0 flex items-center justify-center text-xs text-gray-500 pointer-events-none"
+                  style={{ top: ri * 56, height: 56 }}>
+                  無資料（來源載入中或連線失敗）
+                </div>
+              ) : null)}
 
               {/* Tooltip */}
               {hovDate && (
@@ -791,7 +804,11 @@
       ];
       for (const proxy of proxies) {
         try {
-          const res = await fetch(proxy.url);
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), 5000);
+          let res;
+          try { res = await fetch(proxy.url, { signal: ctl.signal }); }
+          finally { clearTimeout(timer); }
           if (!res.ok) continue;
           const json = await proxy.parse(res);
           const result = json?.chart?.result?.[0];
@@ -1362,12 +1379,24 @@
         // M7
         const processM6 = async () => {
           try {
-            let soxData, displayName;
-            for (const item of [{code:'^SOX',name:'費城半導體指數 (^SOX)'},{code:'SOXX',name:'費半 ETF (SOXX)'},{code:'TSM',name:'台積電 ADR (TSM)'}]) {
+            let soxData, displayName, staleSox = null;
+            try {
+              const sr = await fetch('./data/sox.json');
+              if (sr.ok) {
+                const rows = await sr.json();
+                const ageDays = rows.length ? (Date.now() - new Date(rows[rows.length - 1].date).getTime()) / 86400000 : 999;
+                if (rows.length >= 6) {
+                  if (ageDays <= 6) { soxData = rows.slice(-63); displayName = '費城半導體指數 (^SOX)'; }
+                  else staleSox = rows.slice(-63);
+                }
+              }
+            } catch(e) {}
+            if (!soxData) for (const item of [{code:'^SOX',name:'費城半導體指數 (^SOX)'},{code:'SOXX',name:'費半 ETF (SOXX)'},{code:'TSM',name:'台積電 ADR (TSM)'}]) {
               try { soxData = await fetchYahoo(item.code); displayName = item.name; break; }
               catch(e) { console.warn(`[M7] ${item.code} failed`); }
             }
-            if (!soxData || soxData.length < 5) throw new Error('外部資料連線異常');
+            if (!soxData && staleSox) { soxData = staleSox; displayName = '費城半導體指數 (^SOX，資料較舊)'; }
+            if (!soxData || soxData.length < 6) throw new Error('外部資料連線異常');
 
             const last  = soxData[soxData.length-1].close;
             const prev5 = soxData[soxData.length-6].close;
