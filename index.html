@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.16';
+    const APP_VERSION = 'v 20261105.17';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -401,7 +401,7 @@
     };
 
     // M11 面板：區間切換 + 勝率/輸贏統計 + 圖表
-    const M11Panel = ({ td }) => {
+    const M11Panel = ({ td, expanded, head }) => {
       const { useMemo } = React;
       const [rangeKey, setRangeKey] = useState('r120');
       const [strat] = useM11Strategy();
@@ -489,7 +489,7 @@
             </div>
           </div>
           {stats ? (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-2">
+            <div className={`grid grid-cols-2 ${expanded ? 'md:grid-cols-5' : ''} gap-2 mb-2`}>
               {tile('已平倉', `${stats.count} 次`,
                 <><span className="text-red-400">獲利 {stats.wins}</span>{' · '}<span className="text-green-400">虧損 {stats.losses}</span></>)}
               {tile('勝率', `${stats.winRate.toFixed(0)}%`,
@@ -511,8 +511,13 @@
               ? <>目前持有中：▲ {openTrade.d0} 進場，未實現 <span className={rc(openTrade.ret)}>{sg(openTrade.ret)}</span>（不計入上列統計）。</>
               : '目前空手。'}
           </p>
-          <div className="md:hidden"><M11Chart data={view} trades={trades} /></div>
-          <div className="hidden md:block"><M11Chart data={view} trades={trades} wide /></div>
+          {expanded && (
+            <>
+              {head}
+              <div className="md:hidden"><M11Chart data={view} trades={trades} /></div>
+              <div className="hidden md:block"><M11Chart data={view} trades={trades} wide /></div>
+            </>
+          )}
         </>
       );
     };
@@ -644,7 +649,7 @@
 
     // M13 圖表：上方為所選標的的 K 線（還原價）＋波段連線與買賣標記，下方為外資持股比重與 30／90 日均線＋金叉死叉。
     // 兩個副圖共用同一條時間軸（依日期比例排列）。
-    const ForeignTimingChart = ({ rows }) => {
+    const ForeignTimingChart = ({ rows, expanded, head }) => {
       const { useMemo, useRef, useCallback } = React;
       const [years, setYears] = useState(5);
       const [hov, setHov] = useState(null);
@@ -888,6 +893,9 @@
           ) : (
             <p className="text-xs text-gray-500 mb-3">此區間內沒有已平倉的波段。{bh != null && <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span>。</>}</p>
           )}
+          {expanded && (
+            <>
+              {head}
           <div className="flex">
             {/* 左側座標軸 */}
             <div className="flex-shrink-0 select-none" style={{ width: '3.8rem' }}>
@@ -1016,6 +1024,8 @@
               </span>
             ))}
           </div>
+            </>
+          )}
           <p className="text-[11px] text-gray-500">
             {openT ? <>目前持有中：{openT.d0} 進場，帳面 <span className={rcl(openT.ret)}>{sgp(openT.ret)}</span>（未平倉不計入統計）。</> : '目前空手。'}
             {' '}統計為「賣出日落在此區間」的已平倉波段，以{assetLabel}{adjNote}計，未含手續費與稅；持股比重為盤後公布，實際進出約晚一個交易日。2021-11 之前持股比重為週資料，進出價有數日誤差。K 線依區間自動合併為日／週／月 K（紅漲綠跌）。
@@ -1630,7 +1640,17 @@
           {error && !loading && (
             <div className="mt-4 text-red-400/80 text-xs bg-red-950/30 p-2 rounded break-words">錯誤: {error}</div>
           )}
-          {isExpanded && data && !loading && !error && (
+          {data && !loading && !error && data.renderBlock && (
+            <div className="mt-4">
+              {data.renderBlock(isExpanded, (
+                <div className="flex items-center justify-between mb-3 mt-3 pt-3 border-t border-gray-700">
+                  <p className="text-xs text-gray-500">{data.chartTitle || '近期趨勢'}</p>
+                  {data.legend && <div className="text-xs flex flex-wrap justify-end gap-x-3 gap-y-1">{data.legend}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {isExpanded && data && !loading && !error && !data.renderBlock && (
             <div className="mt-5 pt-5 border-t border-gray-700 animate-in">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-xs text-gray-500">{data.chartTitle || '近期趨勢'}</p>
@@ -2184,7 +2204,7 @@
                 <span className="text-yellow-400 whitespace-nowrap">K</span>
                 <span className="text-sky-400 whitespace-nowrap">D</span>
               </>),
-              renderChart: () => <M11Panel td={td} />,
+              renderBlock: (ex, head) => <M11Panel td={td} expanded={ex} head={head} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M11:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M11:false})); }
@@ -2247,7 +2267,7 @@
               status: 'info',
               summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（${last.date}）。以持股比重的短均線（30／20／60 日）由下穿越長均線（90／60／180 日）為金叉買進、由上穿越為死叉賣出，可切換均線參數與買進標的（加權指數、ETF、個股、正 2），圖上標示金叉死叉、買賣點與波段報酬，並與買進持有對照。回測僅供參考，不計入評分。`,
               chartTitle: '標的 K 線＋買賣標記（上）／外資持股比重與均線（下）· 1／2／3／4／5／10／15 年',
-              renderChart: () => <ForeignTimingChart rows={rows} />,
+              renderBlock: (ex, head) => <ForeignTimingChart rows={rows} expanded={ex} head={head} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M13:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M13:false})); }
