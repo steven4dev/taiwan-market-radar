@@ -462,11 +462,17 @@
     // M12 圖表：外資持股比重 vs 加權指數（長期，雙軸各自自動縮放）
     const ForeignLongChart = ({ rows }) => {
       const { useMemo, useRef, useCallback } = React;
-      const [range, setRange] = useState(1250);
+      const [years, setYears] = useState(5);
       const [hov, setHov] = useState(null);
       const boxRef = useRef(null);
 
-      const view = useMemo(() => rows.slice(-range), [rows, range]);
+      const cutoff = useMemo(() => {
+        const d = new Date(rows[rows.length - 1].date);
+        d.setFullYear(d.getFullYear() - years);
+        return d.toISOString().slice(0, 10);
+      }, [rows, years]);
+      const view = useMemo(() => rows.filter(d => d.date >= cutoff), [rows, cutoff]);
+      const covered = rows[0].date <= cutoff;
       const n = view.length;
 
       const onMove = useCallback(e => {
@@ -475,7 +481,7 @@
         setHov(Math.min(n - 1, Math.max(0, Math.round(((e.clientX - rect.left) / rect.width) * (n - 1)))));
       }, [n]);
 
-      const RANGES = [{ label: '1 年', n: 250 }, { label: '3 年', n: 750 }, { label: '5 年', n: 1250 }];
+      const RANGES = [{ label: '1 年', y: 1 }, { label: '3 年', y: 3 }, { label: '5 年', y: 5 }];
       if (n < 2) return <p className="text-gray-500 text-sm text-center py-6">資料不足。</p>;
 
       const W = 1000, H = 300;
@@ -514,12 +520,12 @@
             <p className="text-xs text-gray-400">
               最新 <span className="text-blue-400 font-bold">{last.ratio.toFixed(2)}%</span>（{last.date}）
               {' · '}區間高 {hiR.ratio.toFixed(2)}%（{hiR.date}）{' · '}區間低 {loR.ratio.toFixed(2)}%（{loR.date}）
-              {n < range && <span className="text-yellow-500">{' · '}目前僅 {n} 個交易日資料</span>}
+              {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {years} 年</span>}
             </p>
             <div className="flex gap-1">
               {RANGES.map(r => (
-                <button key={r.n} onClick={() => setRange(r.n)}
-                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${range === r.n ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                <button key={r.y} onClick={() => setYears(r.y)}
+                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${years === r.y ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
                   {r.label}
                 </button>
               ))}
@@ -1755,14 +1761,19 @@
             const pos = rMax > rMin ? Math.round((last.ratio - rMin) / (rMax - rMin) * 100) : 50;
             const sg = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}`;
 
-            const horizons = [['1 年', 250], ['3 年', 750], ['5 年', 1249]]
-              .filter(([, k]) => n > k)
-              .map(([label, k]) => {
-                const o = rows[n - 1 - k];
+            const horizons = [['1 年', 1], ['3 年', 3], ['5 年', 5]]
+              .map(([label, y]) => {
+                const dt = new Date(last.date);
+                dt.setFullYear(dt.getFullYear() - y);
+                const cut = dt.toISOString().slice(0, 10);
+                let o = null;
+                for (let i = n - 1; i >= 0; i--) { if (rows[i].date <= cut) { o = rows[i]; break; } }
+                if (!o) return null;
                 const idx = (last.index != null && o.index != null)
                   ? `、加權指數 ${sg((last.index / o.index - 1) * 100)}%` : '';
                 return `較 ${label}前持股比重 ${sg(last.ratio - o.ratio)}pp${idx}`;
-              });
+              })
+              .filter(Boolean);
 
             setModuleData(prev => ({...prev, M12: {
               status: 'info',
