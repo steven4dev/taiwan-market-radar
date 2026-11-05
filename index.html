@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.27';
+    const APP_VERSION = 'v 20261105.28';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -519,6 +519,142 @@
               <div className="hidden md:block"><M11Chart data={view} trades={trades} wide /></div>
             </>
           )}
+        </>
+      );
+    };
+
+    // M14 策略（仿 TradingView「Buy/Sell signal」的 BB 標記，規則為依圖面推論，非原作者公式）：
+    //  BB Long ＝ 收盤「首次」跌破布林下軌（20 日、2 倍標準差）；BB Short ＝ 收盤「首次」突破上軌。
+    //  交易：空手遇 Long 以收盤買進（可選 EMA200 濾網：收盤須在 EMA200 之上才買）；持有遇 Short 以收盤賣出。
+    const runM14Strategy = (td, filter) => {
+      let hold = null;
+      const trades = [], marks = [];
+      td.forEach((d, i) => {
+        if (i === 0 || d.bbL == null) return;
+        const p = td[i - 1];
+        let type = null;
+        if (d.close < d.bbL && !(p.bbL != null && p.close < p.bbL)) type = 'long';
+        else if (d.close > d.bbU && !(p.bbU != null && p.close > p.bbU)) type = 'short';
+        if (!type) return;
+        let exec = false;
+        if (type === 'long' && !hold && (!filter || d.close >= d.ema200)) { hold = { i, price: d.close }; exec = true; }
+        else if (type === 'short' && hold) { trades.push({ ei: hold.i, xi: i, ret: d.close / hold.price - 1 }); hold = null; exec = true; }
+        marks.push({ i, type, exec });
+      });
+      return { marks, trades, hold };
+    };
+
+    // M14 面板：收盤／EMA50／EMA200／布林通道＋BB Long／BB Short 標記與實際進出場
+    const M14Panel = ({ td, expanded, head }) => {
+      const { useMemo, useState } = React;
+      const [range, setRange] = useState(250);
+      const [filter, setFilter] = useState(false);
+      const res = useMemo(() => runM14Strategy(td, filter), [td, filter]);
+      if (!expanded) return null;
+
+      const len = Math.min(range, td.length), base = td.length - len;
+      const view = td.slice(base), n = view.length;
+      const W = 1000, H = 300;
+      const vals = view.flatMap(d => [d.close, d.bbU, d.bbL]).filter(v => v != null);   // 縮放只看價格與布林，EMA 超出範圍時被裁切
+      const mn = Math.min(...vals), mx = Math.max(...vals), pd = (mx - mn) * 0.05 || 1;
+      const lo = mn - pd, hi = mx + pd;
+      const fx = i => (i - base) / (n - 1);
+      const fy = v => (1 - (v - lo) / (hi - lo));
+      const mk = key => {
+        let path = '', started = false;
+        view.forEach((d, k) => {
+          if (d[key] == null) return;
+          path += `${started ? 'L' : 'M'} ${(k / (n - 1) * W).toFixed(1)} ${(fy(d[key]) * H).toFixed(1)} `;
+          started = true;
+        });
+        return path;
+      };
+      const marks = res.marks.filter(m => m.i >= base);
+      const trades = res.trades.filter(t => t.xi >= base);
+      const showLbl = marks.filter(m => m.exec).length <= 24;
+      const wins = trades.filter(t => t.ret > 0);
+      const cum = trades.reduce((a, t) => a * (1 + t.ret), 1) - 1;
+      const avgW = wins.length ? wins.reduce((s, t) => s + t.ret, 0) / wins.length * 100 : 0;
+      const losses = trades.filter(t => t.ret <= 0);
+      const avgL = losses.length ? losses.reduce((s, t) => s + t.ret, 0) / losses.length * 100 : 0;
+      const sg = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
+      const fr = [0, 0.25, 0.5, 0.75, 1];
+      const RANGES = [{ label: '半年', v: 120 }, { label: '1 年', v: 250 }, { label: '3 年', v: 750 }, { label: '全部', v: td.length }];
+      const tickIdx = Array.from({ length: 6 }, (_, k) => Math.round(k * (n - 1) / 5));
+
+      return (
+        <>
+          {head}
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex flex-wrap gap-1">
+              {RANGES.map(r => (
+                <button key={r.label} onClick={() => setRange(r.v)}
+                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${range === r.v ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setFilter(f => !f)}
+              className={`px-3 py-1 rounded-md text-xs border transition-colors ${filter ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+              EMA200 濾網：{filter ? '開（收盤在 EMA200 之上才買）' : '關'}
+            </button>
+          </div>
+          <div className="flex">
+            <div className="relative flex-shrink-0 text-xs text-gray-400 select-none" style={{ width: '3.4rem', height: H }}>
+              {fr.map(f => (
+                <span key={f} className="absolute right-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
+                  {Math.round(hi - f * (hi - lo)).toLocaleString()}
+                </span>
+              ))}
+            </div>
+            <div className="flex-1 relative" style={{ height: H }}>
+              <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full block overflow-hidden">
+                {fr.map(f => <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />)}
+                <path d={mk('bbU')} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+                <path d={mk('bbL')} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+                <path d={mk('ema50')} fill="none" stroke="#f87171" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+                <path d={mk('ema200')} fill="none" stroke="#22c55e" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+                <path d={mk('close')} fill="none" stroke="#e5e7eb" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                {trades.filter(t => t.ei >= base).map((t, k) => (
+                  <line key={k} x1={fx(t.ei) * W} y1={fy(td[t.ei].close) * H} x2={fx(t.xi) * W} y2={fy(td[t.xi].close) * H}
+                    stroke={t.ret > 0 ? '#ef4444' : '#22c55e'} strokeWidth="1.5" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" />
+                ))}
+              </svg>
+              {marks.map(m => {
+                const isL = m.type === 'long';
+                const col = isL ? '#ef4444' : '#22c55e';
+                return (
+                  <div key={m.i} className="absolute pointer-events-none" title={`${td[m.i].date} BB ${isL ? 'Long' : 'Short'}${m.exec ? (isL ? '（買進）' : '（賣出）') : '（未成交）'}`}
+                    style={{ left: `${fx(m.i) * 100}%`, top: `${fy(td[m.i].close) * 100}%`, transform: 'translate(-50%,-50%)', opacity: m.exec ? 1 : 0.45 }}>
+                    <div style={{ width: 11, height: 11, borderRadius: '50%', background: m.exec ? col : '#111827', border: `2.5px solid ${col}` }} />
+                    {showLbl && m.exec && (
+                      <span className="absolute left-1/2 text-[10px] font-bold rounded px-1 whitespace-nowrap"
+                        style={{ background: '#facc15', color: '#111827', transform: 'translateX(-50%)', ...(isL ? { top: 14 } : { bottom: 14 }) }}>
+                        BB {isL ? 'Long' : 'Short'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="relative text-xs text-gray-500 select-none" style={{ height: 18, marginLeft: '3.4rem' }}>
+            {tickIdx.map((ti, k) => (
+              <span key={k} className="absolute whitespace-nowrap" style={{ left: `${ti / (n - 1) * 100}%`, transform: 'translateX(-50%)' }}>
+                {view[ti].date.slice(0, 7)}
+              </span>
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">已平倉</div><div className="text-white font-bold">{trades.length} 次（獲利 {wins.length}）</div></div>
+            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">勝率</div><div className="text-white font-bold">{trades.length ? Math.round(wins.length / trades.length * 100) + '%' : '—'}</div></div>
+            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">平均獲利 / 虧損</div><div className="font-bold"><span className="text-red-400">{sg(avgW)}</span> / <span className="text-green-400">{sg(avgL)}</span></div></div>
+            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">累計報酬（複利）</div><div className={`font-bold ${cum >= 0 ? 'text-red-400' : 'text-green-400'}`}>{trades.length ? sg(cum * 100) : '—'}</div></div>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            {res.hold ? `目前持有中（${td[res.hold.i].date} 以 ${td[res.hold.i].close.toFixed(0)} 買進，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}）。` : '目前空手。'}
+            {' '}規則為依 TradingView 圖面推論的 BB Long／Short（收盤首次跌破下軌／突破上軌），非原作者公式；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有遇 Long，或被濾網擋下）。以收盤價計，未含手續費與證交稅，僅供學習參考。
+          </p>
         </>
       );
     };
@@ -2566,27 +2702,25 @@
                         : last.close > last.bbU ? '收盤在布林上軌之上（過熱區，留意回檔）。' : '';
             const rsiTxt = last.rsi == null ? '' : `RSI14 ${last.rsi.toFixed(1)}${last.rsi < 30 ? '（超賣）' : last.rsi > 70 ? '（超買）' : ''}。`;
 
+            const st14 = runM14Strategy(td, false);
+            const lm = st14.marks.length ? st14.marks[st14.marks.length - 1] : null;
+            const sigTxt = (lm ? `最近 BB 標記：BB ${lm.type === 'long' ? 'Long' : 'Short'} ${td[lm.i].date}（${n - 1 - lm.i} 個交易日前）。` : '')
+              + (st14.hold ? `策略持有中（${td[st14.hold.i].date} 買進）。` : '策略空手。');
+
             setModuleData(prev => ({...prev, M14: {
               status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.close - d.ema200 })),
-              summary: `${trendTxt}。收盤 ${last.close.toFixed(0)}，EMA200 ${last.ema200.toFixed(0)}（${dist200 >= 0 ? '+' : ''}${dist200.toFixed(1)}%，${slopeUp ? '向上' : '向下'}），EMA50 ${last.ema50.toFixed(0)}（EMA50 在 EMA200 ${last.ema50 > last.ema200 ? '上方' : '下方'}）。MACD 柱體${last.osc > 0 ? '為正' : '為負'}。${rsiTxt}${bbTxt}${crossTxt}此模組僅供趨勢參考，不計入評分。`,
-              chartTitle: '加權指數 vs EMA50 / EMA200（近 250 日）',
+              summary: `${trendTxt}。收盤 ${last.close.toFixed(0)}，EMA200 ${last.ema200.toFixed(0)}（${dist200 >= 0 ? '+' : ''}${dist200.toFixed(1)}%，${slopeUp ? '向上' : '向下'}），EMA50 ${last.ema50.toFixed(0)}（EMA50 在 EMA200 ${last.ema50 > last.ema200 ? '上方' : '下方'}）。MACD 柱體${last.osc > 0 ? '為正' : '為負'}。${rsiTxt}${bbTxt}${crossTxt}${sigTxt}此模組僅供趨勢參考，不計入評分。`,
+              chartTitle: '收盤 / EMA50 / EMA200 / 布林通道 · BB Long／BB Short 標記與進出場',
               legend: (<>
                 <span className="text-gray-200 whitespace-nowrap">— 收盤</span>
                 <span className="text-red-400 whitespace-nowrap">— EMA50</span>
                 <span className="text-green-400 whitespace-nowrap">— EMA200</span>
+                <span className="text-purple-400 whitespace-nowrap">┄ 布林上下軌</span>
+                <span className="text-red-400 whitespace-nowrap">●買進</span>
+                <span className="text-green-400 whitespace-nowrap">●賣出</span>
               </>),
-              renderChart: () => (
-                <SvgLineChart
-                  data={td.slice(-250)}
-                  lines={[
-                    { key: 'close',  color: '#e5e7eb', width: '1.5' },
-                    { key: 'ema50',  color: '#f87171', width: '1.5' },
-                    { key: 'ema200', color: '#22c55e', width: '2.5' },
-                  ]}
-                  height={180}
-                />
-              ),
+              renderBlock: (ex, head) => <M14Panel td={td} expanded={ex} head={head} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M14:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M14:false})); }
