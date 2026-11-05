@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.22';
+    const APP_VERSION = 'v 20261105.23';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -838,6 +838,11 @@
       const MIN_N = 3;                                   // 已平倉少於 3 次不參與標記（樣本太少）
       const valid = grid.filter(g => g.n >= MIN_N);
       const pick = (arr, f) => arr.reduce((m, g) => (m == null || f(g) > f(m) ? g : m), null);
+      const MEDALS = ['🏆', '🥈', '🥉'];
+      const byTotal = (a, b) => b.total - a.total;
+      const rankTotal = [...valid].sort(byTotal);                                  // 全部組合的累計報酬排名
+      const rankAssets = valid.filter(x => x.pk === pi).sort(byTotal);             // 目前均線參數下，各標的排名
+      const rankPresets = valid.filter(x => x.code === asset).sort(byTotal);       // 目前標的下，各均線參數排名
       const bestTotal = pick(valid, g => g.total);
       const bestDD = pick(valid, g => g.dd);
       const bestRatio = pick(valid.filter(g => g.ratio != null), g => g.ratio);
@@ -984,11 +989,11 @@
             <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
               {PRESETS.map(([a, b], k) => {
                 const g = gridOf(asset, k);
-                const best = valid.filter(x => x.code === asset).reduce((m, x) => (m == null || x.total > m.total ? x : m), null);
+                const mi = rankPresets.findIndex(x => x.pk === k);
                 return (
                   <button key={k} title={`${a} 日均線穿越 ${b} 日均線：金叉買進、死叉賣出${g ? `\n此區間（${assetLabel}）累計 ${pctTxt(g.total)}，已平倉 ${g.n} 次` : ''}`} onClick={() => setPi(k)}
                     className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${pi === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-                    {best && best.pk === k ? '🏆 ' : ''}{a}／{b}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
+                    {mi >= 0 && mi < 3 ? MEDALS[mi] + ' ' : ''}{a}／{b}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
                   </button>
                 );
               })}
@@ -1002,11 +1007,11 @@
             <span className="text-xs text-gray-500 mr-1">買進標的</span>
             {ASSETS.map(([c, l, short]) => {
               const g = gridOf(c, pi);
-              const bestA = valid.filter(x => x.pk === pi).reduce((m, x) => (m == null || x.total > m.total ? x : m), null);
+              const ma = rankAssets.findIndex(x => x.code === c);
               return (
                 <button key={c} title={`${l}${g ? `\n此區間（${PRESETS[pi][0]}／${PRESETS[pi][1]}）累計 ${pctTxt(g.total)}，買進持有 ${pctTxt(g.bh)}，已平倉 ${g.n} 次` : ''}`} onClick={() => setAsset(c)}
                   className={`px-3 py-1 rounded-full text-xs border whitespace-nowrap transition-colors ${asset === c ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-                  {bestA && bestA.code === c ? '🏆 ' : ''}{short}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
+                  {ma >= 0 && ma < 3 ? MEDALS[ma] + ' ' : ''}{short}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
                 </button>
               );
             })}
@@ -1037,8 +1042,9 @@
               {beatCnt > 0
                 ? <><span className="text-red-400 font-bold">{beatCnt} 組</span>勝過買進持有</>
                 : <span className="text-yellow-400 font-bold">沒有任何一組勝過買進持有</span>}
-              {bestTotal && <>；累計報酬最高：<span className="text-white font-bold">{bestTotal.short}＋{bestTotal.S}／{bestTotal.L}</span>（<span className={bestTotal.total >= 0 ? 'text-red-400' : 'text-green-400'}>{pctTxt(bestTotal.total)}</span>
-                {bestTotal.bh != null && <>，同標的買進持有 {pctTxt(bestTotal.bh)}</>}）</>}
+              {rankTotal.length > 0 && <>；累計報酬 {rankTotal.slice(0, 3).map((g, k) => (
+                <span key={k} className="whitespace-nowrap">{k ? '　' : ''}{MEDALS[k]} <span className="text-white font-bold">{g.short}＋{g.S}／{g.L}</span>（<span className={g.total >= 0 ? 'text-red-400' : 'text-green-400'}>{pctTxt(g.total)}</span>）</span>
+              ))}</>}
               {bestDD && <>；回撤最小：<span className="text-white font-bold">{bestDD.short}＋{bestDD.S}／{bestDD.L}</span>（{bestDD.dd.toFixed(0)}%）</>}。
               <button onClick={() => setShowTable(v => !v)} className="ml-2 text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline">
                 {showTable ? '收起對照表 ▲' : `展開 ${grid.length} 組對照表 ▼`}
@@ -1086,7 +1092,10 @@
                         return (
                           <tr key={g.code + g.pk} className={`border-b border-gray-800 ${cur ? 'bg-blue-900/30' : ''} ${small ? 'opacity-60' : ''}`}>
                             <td className="py-1 pr-3 text-white">{g.short}
-                              {isSame(g, bestTotal) && tag('🏆 報酬最高', 'border-yellow-600 text-yellow-300')}
+                              {(() => {
+                                const k = rankTotal.findIndex(x => x.code === g.code && x.pk === g.pk);
+                                return k >= 0 && k < 3 ? tag(MEDALS[k] + ' ' + ['冠軍', '亞軍', '季軍'][k], ['border-yellow-600 text-yellow-300', 'border-gray-400 text-gray-200', 'border-orange-700 text-orange-300'][k]) : null;
+                              })()}
                               {isSame(g, bestDD) && tag('🛡 回撤最小', 'border-sky-600 text-sky-300')}
                               {isSame(g, bestRatio) && tag('⚖ 報酬回撤比最佳', 'border-purple-600 text-purple-300')}
                             </td>
