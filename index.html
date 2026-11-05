@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.30';
+    const APP_VERSION = 'v 20261105.32';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -528,21 +528,29 @@
     //  實際 BB Long／Short 訊號逐根比對，結果 0 筆不符（布林通道採母體標準差，與 Pine ta.stdev 相同）：
     //  BB Long ＝ 前一日收盤在下軌之下、今日收盤「回到下軌之上」；BB Short ＝ 前一日收盤在上軌之上、今日收盤「回到上軌之下」。
     //  交易（本雷達自加）：空手遇 Long 以收盤買進（可選 EMA200 濾網：收盤須在 EMA200 之上才買）；持有遇 Short 以收盤賣出。
-    const runM14Strategy = (td, filter) => {
+    //  可選停損（本雷達自加）：持有期間收盤較買進價下跌達 stopPct 即以當日收盤出場，當天不再接新訊號。
+    //  可選提早進場（本雷達自加）：改為收盤「第一次跌破下軌」當天就買，不等穿回通道內；賣出仍等 BB Short。
+    const runM14Strategy = (td, filter, stopPct = 0, early = false) => {
       let hold = null;
       const trades = [], marks = [];
       td.forEach((d, i) => {
+        if (hold && stopPct > 0 && d.close / hold.price - 1 <= -stopPct) {
+          trades.push({ ei: hold.i, xi: i, ret: d.close / hold.price - 1, stop: true });
+          marks.push({ i, type: 'stop', exec: true });
+          hold = null;
+          return;
+        }
         if (i === 0 || d.bbL == null) return;
         const p = td[i - 1];
         if (p.bbL == null) return;
         let type = null;
-        if (p.close <= p.bbL && d.close > d.bbL) type = 'long';
+        if (early ? (p.close >= p.bbL && d.close < d.bbL) : (p.close <= p.bbL && d.close > d.bbL)) type = 'long';
         else if (p.close >= p.bbU && d.close < d.bbU) type = 'short';
         if (!type) return;
         let exec = false;
         if (type === 'long' && !hold && (!filter || d.close >= d.ema200)) { hold = { i, price: d.close }; exec = true; }
         else if (type === 'short' && hold) { trades.push({ ei: hold.i, xi: i, ret: d.close / hold.price - 1 }); hold = null; exec = true; }
-        marks.push({ i, type, exec });
+        marks.push({ i, type, exec, early: early && type === 'long' });
       });
       return { marks, trades, hold };
     };
@@ -552,7 +560,10 @@
       const { useMemo, useState } = React;
       const [range, setRange] = useState(250);
       const [filter, setFilter] = useState(false);
-      const res = useMemo(() => runM14Strategy(td, filter), [td, filter]);
+      const [stop, setStop] = useState(false);
+      const [early, setEarly] = useState(false);
+      const STOP_PCT = 0.05;
+      const res = useMemo(() => runM14Strategy(td, filter, stop ? STOP_PCT : 0, early), [td, filter, stop, early]);
       const len = Math.min(range, td.length), base = td.length - len;
       const view = td.slice(base), n = view.length;
       const W = 1000, H = 300;
@@ -598,6 +609,14 @@
               className={`px-3 py-1 rounded-md text-xs border transition-colors ${filter ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
               EMA200 濾網：{filter ? '開（收盤在 EMA200 之上才買）' : '關'}
             </button>
+            <button onClick={() => setStop(s => !s)}
+              className={`px-3 py-1 rounded-md text-xs border transition-colors ${stop ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+              停損 5%：{stop ? '開（收盤較買進價跌 5% 出場）' : '關'}
+            </button>
+            <button onClick={() => setEarly(e => !e)}
+              className={`px-3 py-1 rounded-md text-xs border transition-colors ${early ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+              提早進場：{early ? '開（收盤首次跌破下軌就買）' : '關'}
+            </button>
           </div>
           {expanded && (<div className="order-last">
           {head}
@@ -626,13 +645,13 @@
                 const isL = m.type === 'long';
                 const col = isL ? '#ef4444' : '#22c55e';
                 return (
-                  <div key={m.i} className="absolute pointer-events-none" title={`${td[m.i].date} BB ${isL ? 'Long' : 'Short'}${m.exec ? (isL ? '（買進）' : '（賣出）') : '（未成交）'}`}
+                  <div key={m.i} className="absolute pointer-events-none" title={m.type === 'stop' ? `${td[m.i].date} 停損出場` : `${td[m.i].date} ${m.early ? '提早進場' : `BB ${isL ? 'Long' : 'Short'}`}${m.exec ? (isL ? '（買進）' : '（賣出）') : '（未成交）'}`}
                     style={{ left: `${fx(m.i) * 100}%`, top: `${fy(td[m.i].close) * 100}%`, transform: 'translate(-50%,-50%)', opacity: m.exec ? 1 : 0.45 }}>
                     <div style={{ width: 11, height: 11, borderRadius: '50%', background: m.exec ? col : '#111827', border: `2.5px solid ${col}` }} />
                     {showLbl && m.exec && (
                       <span className="absolute left-1/2 text-[10px] font-bold rounded px-1 whitespace-nowrap"
-                        style={{ background: '#facc15', color: '#111827', transform: 'translateX(-50%)', ...(isL ? { top: 14 } : { bottom: 14 }) }}>
-                        BB {isL ? 'Long' : 'Short'}
+                        style={{ background: m.type === 'stop' ? '#fb923c' : '#facc15', color: '#111827', transform: 'translateX(-50%)', ...(isL ? { top: 14 } : { bottom: 14 }) }}>
+                        {m.type === 'stop' ? '停損' : m.early ? '提早買' : `BB ${isL ? 'Long' : 'Short'}`}
                       </span>
                     )}
                   </div>
