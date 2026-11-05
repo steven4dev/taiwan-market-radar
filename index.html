@@ -519,8 +519,8 @@
       const { useMemo, useRef, useCallback } = React;
       const [years, setYears] = useState(5);
       const [hov, setHov] = useState(null);
-      const ASSETS = [['TAIEX', '加權指數'], ['0050', '0050 元大台灣50'], ['006208', '006208 富邦台50'], ['0056', '0056 元大高股息'],
-        ['2330', '2330 台積電'], ['2317', '2317 鴻海'], ['2454', '2454 聯發科'], ['00631L', '00631L 台灣50正2'], ['00685L', '00685L 加權正2']];
+      const ASSETS = [['TAIEX', '加權指數'], ['0050', '0050 元大台灣50'], ['0056', '0056 元大高股息'], ['006208', '006208 富邦台50'],
+        ['00631L', '00631L 台灣50正2'], ['00685L', '00685L 加權正2'], ['2317', '2317 鴻海'], ['2330', '2330 台積電'], ['2454', '2454 聯發科']];
       const [asset, setAsset] = useState('TAIEX');
       const [store, setStore] = useState({});            // code → {rows:[[date,o,h,l,c]]} | 'loading' | 'error'
       useEffect(() => {
