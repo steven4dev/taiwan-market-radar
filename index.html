@@ -360,16 +360,31 @@
     // M11 面板：區間切換 + 勝率/輸贏統計 + 圖表
     const M11Panel = ({ td }) => {
       const { useMemo } = React;
-      const [range, setRange] = useState(120);
+      const [rangeKey, setRangeKey] = useState('r120');
       const [strat] = useM11Strategy();
       const sigKey = strat === 'conv' ? 'sigConv' : 'sigCross';
       const WARM = 140;                       // 慢線 EMA130 暖機期，其前的訊號不計
       const n = td.length;
+      // 日 = 交易日筆數；年 = 日曆年限（自最新日期往前推 N 年）
       const RANGES = [
-        { label: '近 60 日', n: 60 }, { label: '近 120 日', n: 120 }, { label: '近 1 年', n: 250 },
-        { label: '近 3 年', n: 750 }, { label: '全部', n: n - WARM },
+        { key: 'r60', label: '近 60 日', rows: 60 }, { key: 'r120', label: '近 120 日', rows: 120 },
+        { key: 'y1', label: '近 1 年', years: 1 }, { key: 'y3', label: '近 3 年', years: 3 },
+        { key: 'all', label: '全部', all: true },
       ];
-      const size = Math.max(2, Math.min(range, n - WARM));
+      const calcSize = r => {
+        if (r.all) return n - WARM;
+        if (r.years) {
+          const d = new Date(td[n - 1].date);
+          d.setFullYear(d.getFullYear() - r.years);
+          const cut = d.toISOString().slice(0, 10);
+          let i = 0;
+          while (i < n && td[i].date < cut) i++;
+          return n - i;
+        }
+        return r.rows;
+      };
+      const cur = RANGES.find(r => r.key === rangeKey) || RANGES[1];
+      const size = Math.max(2, Math.min(calcSize(cur), n - WARM));
 
       const { view, trades, stats, openTrade } = useMemo(() => {
         const viewStart = n - size;
@@ -423,8 +438,8 @@
             </div>
             <div className="flex flex-wrap gap-1">
               {RANGES.map(r => (
-                <button key={r.label} onClick={() => setRange(r.n)}
-                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${range === r.n ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                <button key={r.key} onClick={() => setRangeKey(r.key)}
+                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${rangeKey === r.key ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
                   {r.label}
                 </button>
               ))}
