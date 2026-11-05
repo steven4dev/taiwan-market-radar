@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.25';
+    const APP_VERSION = 'v 20261105.26';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -1106,13 +1106,18 @@
                             <td className="pr-3">{g.S}／{g.L}</td>
                             <td className="pr-3 text-right">{g.n}{small && <span className="text-gray-500">（樣本少）</span>}</td>
                             <td className="pr-3 text-right">{g.winRate != null ? g.winRate.toFixed(0) + '%' : '—'}</td>
-                            <td className={`pr-3 text-right font-bold ${g.total >= 0 ? 'text-red-400' : 'text-green-400'}`}>{pctTxt(g.total)}</td>
-                            <td className="pr-3 text-right">{pctTxt(g.bh)}</td>
-                            <td className="pr-3 text-right">
-                              {g.excess != null && g.excess > 0
-                                ? <span className="inline-block px-1.5 py-0.5 rounded border border-yellow-500 bg-yellow-500/10 text-red-400 font-bold" title="勝過買進持有">{pctTxt(g.excess)}</span>
-                                : <span className="text-green-400">{g.excess != null ? pctTxt(g.excess) : '—'}</span>}
-                            </td>
+                            {(() => {
+                              const gold = 'inline-block px-1.5 py-0.5 rounded border border-yellow-500 bg-yellow-500/10';
+                              const totalWins = g.bh != null && g.total > g.bh;       // 兩者中較大的一方用金框
+                              const bhWins = g.bh != null && g.bh >= g.total;
+                              return (
+                                <>
+                                  <td className="pr-3 text-right"><span className={`font-bold ${g.total >= 0 ? 'text-red-400' : 'text-green-400'} ${totalWins ? gold : ''}`} title={totalWins ? '策略較佳' : undefined}>{pctTxt(g.total)}</span></td>
+                                  <td className="pr-3 text-right"><span className={`${g.bh != null && g.bh >= 0 ? 'text-red-400' : 'text-green-400'} ${bhWins ? gold + ' font-bold' : ''}`} title={bhWins ? '買進持有較佳' : undefined}>{pctTxt(g.bh)}</span></td>
+                                </>
+                              );
+                            })()}
+                            <td className={`pr-3 text-right ${g.excess > 0 ? 'text-red-400' : 'text-green-400'}`}>{g.excess != null ? pctTxt(g.excess) : '—'}</td>
                             <td className="pr-3 text-right">{g.dd.toFixed(0)}%</td>
                             <td>{cur ? <span className="text-blue-400">目前</span>
                               : <button onClick={() => { setAsset(g.code); setPi(g.pk); }} className="px-2 py-0.5 rounded border border-gray-600 text-gray-300 hover:text-white hover:border-blue-500">套用</button>}</td>
@@ -1122,7 +1127,7 @@
                     </tbody>
                   </table>
                 </div>
-                <p className="mt-2 text-[11px] text-gray-500">差＝累計報酬 − 同標的同區間買進持有；金框＝勝過買進持有。最大回撤取區間內含持有中未實現損益的權益曲線。名次依上方所選的排序鍵；灰色列為已平倉不足 {MIN_N} 次（樣本少），排在最後、不列名次。</p>
+                <p className="mt-2 text-[11px] text-gray-500">差＝累計報酬 − 同標的同區間買進持有；金框＝累計報酬與買進持有兩者中較高的一方。最大回撤取區間內含持有中未實現損益的權益曲線。名次依上方所選的排序鍵；灰色列為已平倉不足 {MIN_N} 次（樣本少），排在最後、不列名次。</p>
               </div>
             );
           })()}
