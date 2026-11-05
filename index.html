@@ -526,7 +526,10 @@
         d.setFullYear(d.getFullYear() - years);
         return d.toISOString().slice(0, 10);
       }, [rows, years]);
-      const DAY = 864e5, MA_S = 30, MA_L = 90;
+      const DAY = 864e5;
+      const PRESETS = [[30, 90], [20, 60], [60, 180]];
+      const [pi, setPi] = useState(0);
+      const [MA_S, MA_L] = PRESETS[pi];
       const withMa = useMemo(() => {
         const t = rows.map(d => Date.parse(d.date));
         const ma = W => {
@@ -539,7 +542,24 @@
         };
         const ms = ma(MA_S), ml = ma(MA_L);
         return rows.map((d, i) => ({ ...d, ms: ms[i], ml: ml[i] }));
-      }, [rows]);
+      }, [rows, MA_S, MA_L]);
+      const trades = useMemo(() => {
+        const t = withMa.map(d => Date.parse(d.date));
+        const warm = t[0] + MA_L * DAY;
+        const out = [];
+        let hold = null;
+        for (let i = 1; i < withMa.length; i++) {
+          if (t[i - 1] < warm || withMa[i].index == null) continue;
+          const a = withMa[i - 1].ms - withMa[i - 1].ml, b = withMa[i].ms - withMa[i].ml;
+          if (a <= 0 && b > 0 && hold == null) hold = i;
+          else if (a >= 0 && b < 0 && hold != null) { out.push({ i0: hold, i1: i, open: false }); hold = null; }
+        }
+        if (hold != null) out.push({ i0: hold, i1: withMa.length - 1, open: true });
+        return out.map(x => {
+          const p0 = withMa[x.i0].index, p1 = withMa[x.i1].index;
+          return { ...x, p0, p1, ret: (p1 / p0 - 1) * 100, d0: withMa[x.i0].date, d1: withMa[x.i1].date };
+        });
+      }, [withMa]);
       const view = useMemo(() => withMa.filter(d => d.date >= cutoff), [withMa, cutoff]);
       const covered = rows[0].date <= cutoff;
       const n = view.length;
@@ -592,6 +612,31 @@
         if (a <= 0 && b > 0) crosses.push({ i, gold: true });
         else if (a >= 0 && b < 0) crosses.push({ i, gold: false });
       }
+      const off = withMa.length - n;
+      const vt = trades.filter(x => x.i1 >= off).map(x => ({ ...x, a: Math.max(0, x.i0 - off), b: x.i1 - off, clipped: x.i0 < off }));
+      const closed = vt.filter(x => !x.open);
+      const openT = vt.find(x => x.open) || null;
+      const rets = closed.map(x => x.ret);
+      const winsA = rets.filter(r => r > 0), lossA = rets.filter(r => r <= 0);
+      const avgA = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+      const st = rets.length ? {
+        count: rets.length, wins: winsA.length, losses: lossA.length,
+        winRate: winsA.length / rets.length * 100,
+        avgWin: avgA(winsA), avgLoss: avgA(lossA),
+        total: (rets.reduce((e, r) => e * (1 + r / 100), 1) - 1) * 100,
+        best: Math.max(...rets), worst: Math.min(...rets),
+      } : null;
+      const bh = (view[0].index != null && last.index != null) ? (last.index / view[0].index - 1) * 100 : null;
+      const sgp = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
+      const rcl = v => (v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400');
+      const tile = (label, value, sub) => (
+        <div key={label} className="bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2">
+          <p className="text-[11px] text-gray-500">{label}</p>
+          <p className="text-base font-bold text-white leading-snug">{value}</p>
+          <p className="text-[11px] text-gray-400">{sub}</p>
+        </div>
+      );
+      const yI = v => (1 - (v - is.lo) / (is.hi - is.lo)) * 100;
       const nGold = crosses.filter(c => c.gold).length;
       const showLbl = crosses.length <= 30;
       const tickTs = Array.from({ length: 7 }, (_, k) => ts[0] + (span * k) / 6);
@@ -606,7 +651,7 @@
               {' · '}區間高 {hiR.ratio.toFixed(2)}%（{hiR.date}）{' · '}區間低 {loR.ratio.toFixed(2)}%（{loR.date}）
               {view[0].date < DAILY_FROM && <span className="text-gray-500">{' · '}{DAILY_FROM.slice(0, 7)} 之前為每週一筆</span>}
               {' · '}<span className="text-red-400">金叉 {nGold}</span> / <span className="text-green-400">死叉 {crosses.length - nGold}</span>
-              <span className="text-gray-500">（30 日均線穿越 90 日均線）</span>
+              <span className="text-gray-500">（{MA_S} 日均線穿越 {MA_L} 日均線）</span>
               {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {years} 年</span>}
             </p>
             <div className="flex flex-wrap gap-1">
@@ -617,6 +662,18 @@
                 </button>
               ))}
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className="text-xs text-gray-500">均線參數</span>
+            <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
+              {PRESETS.map(([a, b], k) => (
+                <button key={k} title={`${a} 日均線穿越 ${b} 日均線：金叉買進、死叉賣出`} onClick={() => setPi(k)}
+                  className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${pi === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                  {a}／{b}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs text-gray-500">金叉買進、死叉賣出（以加權指數收盤計）· 連線＝一個波段</span>
           </div>
           <div className="flex">
             <div className="relative flex-shrink-0 text-xs text-blue-400 select-none" style={{ width: '3.2rem', height: H }}>
@@ -633,11 +690,39 @@
                   <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
                 ))}
                 {is && <path d={mk('index', is)} fill="none" stroke="#f87171" strokeWidth="1.3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
+                {is && vt.map((x, k) => {
+                  const col = x.ret >= 0 ? '#ef4444' : '#22c55e';
+                  const mag = Math.abs(x.ret);
+                  const w = mag >= 15 ? 3.6 : mag >= 5 ? 2.8 : 2;
+                  const y0 = H * yI(view[x.a].index) / 100, y1 = H * yI(view[x.b].index) / 100;
+                  return (
+                    <line key={'tr' + k} x1={fx(x.a) * W} y1={y0} x2={fx(x.b) * W} y2={y1} stroke={col} strokeWidth={w}
+                      strokeLinecap="round" strokeDasharray={x.open ? '0.1 6' : '8 4'} vectorEffect="non-scaling-stroke" />
+                  );
+                })}
                 <path d={mk('ml', rs)} fill="none" stroke="#a78bfa" strokeWidth="1.2" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" opacity="0.9" />
                 <path d={mk('ms', rs)} fill="none" stroke="#facc15" strokeWidth="1.2" vectorEffect="non-scaling-stroke" opacity="0.9" />
                 <path d={mk('ratio', rs)} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 {hov != null && <line x1={fx(hov) * W} x2={fx(hov) * W} y1="0" y2={H} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
               </svg>
+              {is && vt.map((x, k) => {
+                const col = x.ret >= 0 ? '#ef4444' : '#22c55e';
+                const label = `${x.ret >= 0 ? '+' : ''}${x.ret.toFixed(1)}%`;
+                const t0 = yI(view[x.a].index), t1 = yI(view[x.b].index);
+                const wide = fx(x.b) - fx(x.a) > 0.05;
+                return (
+                  <React.Fragment key={'te' + k}>
+                    <div className="absolute pointer-events-none" title={`${x.d0} → ${x.open ? '最新' : x.d1}`}
+                      style={{ left: `${fx(x.b) * 100}%`, top: `${t1}%`, transform: 'translate(-50%,-50%)', width: 9, height: 9, borderRadius: '50%',
+                        background: x.open ? '#111827' : col, border: `2px solid ${col}` }} />
+                    {vt.length <= 20 && wide && (
+                      <span className="absolute pointer-events-none text-[10px] font-bold rounded px-1 whitespace-nowrap"
+                        style={{ left: `${(fx(x.a) + fx(x.b)) * 50}%`, top: `${(t0 + t1) / 2}%`, transform: 'translate(-50%,-150%)',
+                          background: 'rgba(17,24,39,0.88)', border: `1px solid ${col}`, color: col }}>{label}</span>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               {crosses.map(c => {
                 const col = c.gold ? '#ef4444' : '#22c55e';
                 const v = view[c.i].ms;
@@ -660,8 +745,8 @@
                   <div className="text-gray-300 font-bold">{hd.date}</div>
                   <div className="text-blue-400">外資持股占比 {hd.ratio.toFixed(2)}%</div>
                   <div className="text-gray-300">不含台積電 {hd.exTsmc.toFixed(2)}%</div>
-                  <div className="text-yellow-400">30 日均 {hd.ms.toFixed(2)}%</div>
-                  <div className="text-purple-400">90 日均 {hd.ml.toFixed(2)}%</div>
+                  <div className="text-yellow-400">{MA_S} 日均 {hd.ms.toFixed(2)}%</div>
+                  <div className="text-purple-400">{MA_L} 日均 {hd.ml.toFixed(2)}%</div>
                   <div className="text-red-400">加權指數 {hd.index != null ? hd.index.toLocaleString() : '—'}</div>
                 </div>
               )}
@@ -681,6 +766,29 @@
               </span>
             ))}
           </div>
+          {st ? (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3 mb-2">
+              {tile('已平倉', `${st.count} 次`,
+                <><span className="text-red-400">獲利 {st.wins}</span>{' · '}<span className="text-green-400">虧損 {st.losses}</span></>)}
+              {tile('勝率', `${st.winRate.toFixed(0)}%`,
+                st.avgWin != null && st.avgLoss != null && st.avgLoss < 0
+                  ? `盈虧比 ${(st.avgWin / Math.abs(st.avgLoss)).toFixed(2)}` : '盈虧比 —')}
+              {tile('平均每筆',
+                <span className="text-sm"><span className={rcl(st.avgWin)}>{sgp(st.avgWin)}</span>{' / '}<span className={rcl(st.avgLoss)}>{sgp(st.avgLoss)}</span></span>,
+                '平均獲利 / 平均虧損')}
+              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>,
+                <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span></>)}
+              {tile('單筆極值',
+                <span className="text-sm"><span className={rcl(st.best)}>{sgp(st.best)}</span>{' / '}<span className={rcl(st.worst)}>{sgp(st.worst)}</span></span>,
+                '最佳 / 最差')}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 mt-3">此區間內沒有已平倉的波段。{bh != null && <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span>。</>}</p>
+          )}
+          <p className="text-[11px] text-gray-500">
+            {openT ? <>目前持有中：{openT.d0} 進場，帳面 <span className={rcl(openT.ret)}>{sgp(openT.ret)}</span>（未平倉不計入統計）。</> : '目前空手。'}
+            {' '}統計為「賣出日落在此區間」的已平倉波段，以加權指數收盤價計，未含手續費與稅；持股比重為盤後公布，實際進出約晚一個交易日。2021-11 之前為週資料，進出價有數日誤差。
+          </p>
         </>
       );
     };
