@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.38';
+    const APP_VERSION = 'v 20261105.39';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -467,9 +467,9 @@
 
       const sg = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
       const rc = v => (v == null ? 'text-gray-400' : v > 0 ? 'text-red-400' : 'text-green-400');
-      const tile = (label, value, sub) => (
-        <div key={label} className="bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2">
-          <p className="text-[11px] text-gray-500">{label}</p>
+      const tile = (label, value, sub, win = false) => (
+        <div key={label} className={`rounded-lg px-3 py-2 border ${win ? 'border-yellow-500 bg-yellow-500/10' : 'bg-gray-900/60 border-gray-700'}`}>
+          <p className="text-[11px] text-gray-500">{label}{win && <span className="ml-1 text-yellow-400 font-bold">🏆 勝出</span>}</p>
           <p className="text-base font-bold text-white leading-snug">{value}</p>
           <p className="text-[11px] text-gray-400">{sub}</p>
         </div>
@@ -495,8 +495,8 @@
               {tile('勝率', `${stats.winRate.toFixed(0)}%`,
                 stats.avgWin != null && stats.avgLoss != null && stats.avgLoss < 0
                   ? `盈虧比 ${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2)}` : '盈虧比 —')}
-              {tile('累計報酬', <span className={rc(stats.total)}>{sg(stats.total)}</span>, '各波段依序複利')}
-              {tile('買進持有', <span className={rc(bh)}>{sg(bh)}</span>, '區間首日買進抱到最新')}
+              {tile('累計報酬', <span className={rc(stats.total)}>{sg(stats.total)}</span>, '各波段依序複利', bh != null && stats.total > bh)}
+              {tile('買進持有', <span className={rc(bh)}>{sg(bh)}</span>, '區間首日買進抱到最新', bh != null && bh > stats.total)}
               {tile('平均每筆',
                 <span className="text-sm"><span className={rc(stats.avgWin)}>{sg(stats.avgWin)}</span>{' / '}<span className={rc(stats.avgLoss)}>{sg(stats.avgLoss)}</span></span>,
                 '平均獲利 / 平均虧損')}
@@ -1118,9 +1118,9 @@
       const adjNote = asset === 'TAIEX' ? '收盤價' : '還原收盤價（含股息）';
       const sgp = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
       const rcl = v => (v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400');
-      const tile = (label, value, sub) => (
-        <div key={label} className="bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2">
-          <p className="text-[11px] text-gray-500">{label}</p>
+      const tile = (label, value, sub, win = false) => (
+        <div key={label} className={`rounded-lg px-3 py-2 border ${win ? 'border-yellow-500 bg-yellow-500/10' : 'bg-gray-900/60 border-gray-700'}`}>
+          <p className="text-[11px] text-gray-500">{label}{win && <span className="ml-1 text-yellow-400 font-bold">🏆 勝出</span>}</p>
           <p className="text-base font-bold text-white leading-snug">{value}</p>
           <p className="text-[11px] text-gray-400">{sub}</p>
         </div>
@@ -1199,8 +1199,8 @@
               {tile('平均每筆',
                 <span className="text-sm"><span className={rcl(st.avgWin)}>{sgp(st.avgWin)}</span>{' / '}<span className={rcl(st.avgLoss)}>{sgp(st.avgLoss)}</span></span>,
                 '平均獲利 / 平均虧損')}
-              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>, '各波段依序複利')}
-              {tile('買進持有', <span className={rcl(bh)}>{sgp(bh)}</span>, '區間首日買進抱到最新')}
+              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>, '各波段依序複利', bh != null && st.total > bh)}
+              {tile('買進持有', <span className={rcl(bh)}>{sgp(bh)}</span>, '區間首日買進抱到最新', bh != null && bh > st.total)}
               {tile('單筆極值',
                 <span className="text-sm"><span className={rcl(st.best)}>{sgp(st.best)}</span>{' / '}<span className={rcl(st.worst)}>{sgp(st.worst)}</span></span>,
                 '最佳 / 最差')}
