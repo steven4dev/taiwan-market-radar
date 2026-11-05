@@ -526,7 +526,21 @@
         d.setFullYear(d.getFullYear() - years);
         return d.toISOString().slice(0, 10);
       }, [rows, years]);
-      const view = useMemo(() => rows.filter(d => d.date >= cutoff), [rows, cutoff]);
+      const DAY = 864e5, MA_S = 30, MA_L = 90;
+      const withMa = useMemo(() => {
+        const t = rows.map(d => Date.parse(d.date));
+        const ma = W => {
+          let j = 0, sum = 0;
+          return rows.map((d, i) => {
+            sum += d.ratio;
+            while (t[j] <= t[i] - W * DAY) { sum -= rows[j].ratio; j++; }
+            return sum / (i - j + 1);
+          });
+        };
+        const ms = ma(MA_S), ml = ma(MA_L);
+        return rows.map((d, i) => ({ ...d, ms: ms[i], ml: ml[i] }));
+      }, [rows]);
+      const view = useMemo(() => withMa.filter(d => d.date >= cutoff), [withMa, cutoff]);
       const covered = rows[0].date <= cutoff;
       const n = view.length;
       const ts = useMemo(() => view.map(d => Date.parse(d.date)), [view]);
@@ -569,6 +583,17 @@
       const last = view[n - 1];
       const hiR = view.reduce((m, d) => (d.ratio > m.ratio ? d : m), view[0]);
       const loR = view.reduce((m, d) => (d.ratio < m.ratio ? d : m), view[0]);
+      // 金叉／死叉：30 日均線自下穿越 90 日均線＝金叉；自上穿越＝死叉（資料起點後 90 日內均線未成形，不計）
+      const warmTs = Date.parse(rows[0].date) + MA_L * DAY;
+      const crosses = [];
+      for (let i = 1; i < n; i++) {
+        if (ts[i - 1] < warmTs) continue;
+        const a = view[i - 1].ms - view[i - 1].ml, b = view[i].ms - view[i].ml;
+        if (a <= 0 && b > 0) crosses.push({ i, gold: true });
+        else if (a >= 0 && b < 0) crosses.push({ i, gold: false });
+      }
+      const nGold = crosses.filter(c => c.gold).length;
+      const showLbl = crosses.length <= 30;
       const tickTs = Array.from({ length: 7 }, (_, k) => ts[0] + (span * k) / 6);
       const hd = hov != null ? view[hov] : null;
       const tipLeft = hov != null && fx(hov) > 0.6;
@@ -580,6 +605,8 @@
               最新 <span className="text-blue-400 font-bold">{last.ratio.toFixed(2)}%</span>（{last.date}）
               {' · '}區間高 {hiR.ratio.toFixed(2)}%（{hiR.date}）{' · '}區間低 {loR.ratio.toFixed(2)}%（{loR.date}）
               {view[0].date < DAILY_FROM && <span className="text-gray-500">{' · '}{DAILY_FROM.slice(0, 7)} 之前為每週一筆</span>}
+              {' · '}<span className="text-red-400">金叉 {nGold}</span> / <span className="text-green-400">死叉 {crosses.length - nGold}</span>
+              <span className="text-gray-500">（30 日均線穿越 90 日均線）</span>
               {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {years} 年</span>}
             </p>
             <div className="flex flex-wrap gap-1">
@@ -606,15 +633,35 @@
                   <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
                 ))}
                 {is && <path d={mk('index', is)} fill="none" stroke="#f87171" strokeWidth="1.3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
+                <path d={mk('ml', rs)} fill="none" stroke="#a78bfa" strokeWidth="1.2" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" opacity="0.9" />
+                <path d={mk('ms', rs)} fill="none" stroke="#facc15" strokeWidth="1.2" vectorEffect="non-scaling-stroke" opacity="0.9" />
                 <path d={mk('ratio', rs)} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 {hov != null && <line x1={fx(hov) * W} x2={fx(hov) * W} y1="0" y2={H} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
               </svg>
+              {crosses.map(c => {
+                const col = c.gold ? '#ef4444' : '#22c55e';
+                const v = view[c.i].ms;
+                const top = (1 - (v - rs.lo) / (rs.hi - rs.lo)) * 100;
+                return (
+                  <div key={c.i} className="absolute pointer-events-none" style={{ left: `${fx(c.i) * 100}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}>
+                    <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#111827', border: `2.5px solid ${col}` }} />
+                    {showLbl && (
+                      <span className="absolute left-1/2 text-[10px] font-bold text-white rounded px-1 whitespace-nowrap"
+                        style={{ background: col, transform: 'translateX(-50%)', ...(c.gold ? { top: 14 } : { bottom: 14 }) }}>
+                        {c.gold ? '金叉' : '死叉'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
               {hd && (
                 <div className="absolute top-2 z-10 pointer-events-none bg-gray-900/90 border border-gray-600 rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-nowrap"
                   style={tipLeft ? { right: `${100 - fx(hov) * 100 + 1}%` } : { left: `${fx(hov) * 100 + 1}%` }}>
                   <div className="text-gray-300 font-bold">{hd.date}</div>
                   <div className="text-blue-400">外資持股占比 {hd.ratio.toFixed(2)}%</div>
                   <div className="text-gray-300">不含台積電 {hd.exTsmc.toFixed(2)}%</div>
+                  <div className="text-yellow-400">30 日均 {hd.ms.toFixed(2)}%</div>
+                  <div className="text-purple-400">90 日均 {hd.ml.toFixed(2)}%</div>
                   <div className="text-red-400">加權指數 {hd.index != null ? hd.index.toLocaleString() : '—'}</div>
                 </div>
               )}
@@ -1062,7 +1109,7 @@
         ? `大盤近20日漲幅 ${rally > 0 ? '+' : ''}${rally.toFixed(1)}%（${rally > 20 ? '漲幅過大' : rally > 12 ? '漲幅偏高' : '正常'}）`
         : '技術面資料載入中...';
 
-      // Signal 4：跌破股神指標（M1 分水嶺）
+      // Signal 4：跌破多空分水嶺（M1）
       const s4Triggered = m0?.status === 'red';
       const s4Status = !m0 ? 'yellow' : m0.status === 'red' ? 'red' : 'green';
       const s4Desc = !m0 ? '分水嶺資料載入中...'
@@ -1089,7 +1136,7 @@
         { num: '①', label: '大盤情緒過熱',   desc: s1Desc, status: s1Status, triggered: s1Triggered, tip: '貪婪指數 > 50 慢慢減碼' },
         { num: '②', label: '月營收警訊',     desc: s2Desc, status: s2Status, triggered: s2Triggered, tip: '同業差/衰退/沒創新高 → 減碼' },
         { num: '③', label: '短線漲幅過高',   desc: s3Desc, status: s3Status, triggered: s3Triggered, tip: '近20日漲幅 > 15% → 先減碼' },
-        { num: '④', label: '跌破股神指標',   desc: s4Desc, status: s4Status, triggered: s4Triggered, tip: '跌破分水嶺，嚴守紀律停損' },
+        { num: '④', label: '跌破多空分水嶺',  desc: s4Desc, status: s4Status, triggered: s4Triggered, tip: '跌破分水嶺，嚴守紀律停損' },
         { num: '⑤', label: '夜盤重跌無護盤', desc: s5Desc, status: s5Status, triggered: s5Triggered, tip: 'M9夜盤↓ + M8公股↓ → 雙重利空' },
       ];
 
