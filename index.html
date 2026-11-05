@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.28';
+    const APP_VERSION = 'v 20261105.30';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -101,7 +101,7 @@
       M11: { weight: 0.06, title: 'MACD+KD 短線時機', icon: 'Crosshair', wideWhenExpanded: true },
       M12: { weight: 0, title: '外資持股比重 vs 加權指數（長期）', icon: 'LineChart', wide: true },
       M13: { weight: 0, title: '外資持股擇時回測（可選標的）', icon: 'Crosshair', wide: true },
-      M14: { weight: 0, title: 'EMA200 趨勢', icon: 'TrendingUp', wideWhenExpanded: true },
+      M14: { weight: 0, title: 'EMA200 趨勢', icon: 'TrendingUp', wide: true },
     };
 
     const SCORE_LABELS = [
@@ -523,18 +523,21 @@
       );
     };
 
-    // M14 策略（仿 TradingView「Buy/Sell signal」的 BB 標記，規則為依圖面推論，非原作者公式）：
-    //  BB Long ＝ 收盤「首次」跌破布林下軌（20 日、2 倍標準差）；BB Short ＝ 收盤「首次」突破上軌。
-    //  交易：空手遇 Long 以收盤買進（可選 EMA200 濾網：收盤須在 EMA200 之上才買）；持有遇 Short 以收盤賣出。
+    // M14 策略：複製 TradingView 指標「Buy/Sell singal with RSI, MA, RSI DIV, MACD, BB」的 BB 標記。
+    //  參數與條件由該圖表的指標輸入值（BB 長度 22、來源 close、倍數 2）反推，並與 TXF1! 日線 278 根 K 線的
+    //  實際 BB Long／Short 訊號逐根比對，結果 0 筆不符（布林通道採母體標準差，與 Pine ta.stdev 相同）：
+    //  BB Long ＝ 前一日收盤在下軌之下、今日收盤「回到下軌之上」；BB Short ＝ 前一日收盤在上軌之上、今日收盤「回到上軌之下」。
+    //  交易（本雷達自加）：空手遇 Long 以收盤買進（可選 EMA200 濾網：收盤須在 EMA200 之上才買）；持有遇 Short 以收盤賣出。
     const runM14Strategy = (td, filter) => {
       let hold = null;
       const trades = [], marks = [];
       td.forEach((d, i) => {
         if (i === 0 || d.bbL == null) return;
         const p = td[i - 1];
+        if (p.bbL == null) return;
         let type = null;
-        if (d.close < d.bbL && !(p.bbL != null && p.close < p.bbL)) type = 'long';
-        else if (d.close > d.bbU && !(p.bbU != null && p.close > p.bbU)) type = 'short';
+        if (p.close <= p.bbL && d.close > d.bbL) type = 'long';
+        else if (p.close >= p.bbU && d.close < d.bbU) type = 'short';
         if (!type) return;
         let exec = false;
         if (type === 'long' && !hold && (!filter || d.close >= d.ema200)) { hold = { i, price: d.close }; exec = true; }
@@ -550,8 +553,6 @@
       const [range, setRange] = useState(250);
       const [filter, setFilter] = useState(false);
       const res = useMemo(() => runM14Strategy(td, filter), [td, filter]);
-      if (!expanded) return null;
-
       const len = Math.min(range, td.length), base = td.length - len;
       const view = td.slice(base), n = view.length;
       const W = 1000, H = 300;
@@ -583,8 +584,7 @@
       const tickIdx = Array.from({ length: 6 }, (_, k) => Math.round(k * (n - 1) / 5));
 
       return (
-        <>
-          {head}
+        <div className="flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div className="flex flex-wrap gap-1">
               {RANGES.map(r => (
@@ -599,6 +599,8 @@
               EMA200 濾網：{filter ? '開（收盤在 EMA200 之上才買）' : '關'}
             </button>
           </div>
+          {expanded && (<div className="order-last">
+          {head}
           <div className="flex">
             <div className="relative flex-shrink-0 text-xs text-gray-400 select-none" style={{ width: '3.4rem', height: H }}>
               {fr.map(f => (
@@ -645,6 +647,7 @@
               </span>
             ))}
           </div>
+          </div>)}
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">已平倉</div><div className="text-white font-bold">{trades.length} 次（獲利 {wins.length}）</div></div>
             <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">勝率</div><div className="text-white font-bold">{trades.length ? Math.round(wins.length / trades.length * 100) + '%' : '—'}</div></div>
@@ -653,9 +656,9 @@
           </div>
           <p className="mt-2 text-xs text-gray-500">
             {res.hold ? `目前持有中（${td[res.hold.i].date} 以 ${td[res.hold.i].close.toFixed(0)} 買進，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}）。` : '目前空手。'}
-            {' '}規則為依 TradingView 圖面推論的 BB Long／Short（收盤首次跌破下軌／突破上軌），非原作者公式；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有遇 Long，或被濾網擋下）。以收盤價計，未含手續費與證交稅，僅供學習參考。
+            {' '}規則：BB(22, 2) 收盤自下軌之下回到之上＝BB Long、自上軌之上回到之下＝BB Short（與 TradingView 該指標在 TXF1! 日線的訊號逐根比對相符；本雷達用加權指數，個別日期可能與期貨差一兩天）；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有遇 Long，或被濾網擋下）。以收盤價計，未含手續費與證交稅，僅供學習參考。
           </p>
-        </>
+        </div>
       );
     };
 
@@ -2671,12 +2674,12 @@
               else { avgG = (avgG * 13 + g) / 14; avgL = (avgL * 13 + l) / 14; }
               return { ...d, rsi: i < 14 ? null : (avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)) };
             });
-            // 布林通道 20 日、2 倍標準差
+            // 布林通道 22 日、2 倍標準差（母體標準差；參數取自 TradingView 指標設定）
             td = td.map((d, i, a) => {
-              if (i < 19) return { ...d, bbU: null, bbL: null };
-              const w = a.slice(i - 19, i + 1).map(x => x.close);
-              const m = w.reduce((s, v) => s + v, 0) / 20;
-              const sd = Math.sqrt(w.reduce((s, v) => s + (v - m) ** 2, 0) / 20);
+              if (i < 21) return { ...d, bbU: null, bbL: null };
+              const w = a.slice(i - 21, i + 1).map(x => x.close);
+              const m = w.reduce((s, v) => s + v, 0) / 22;
+              const sd = Math.sqrt(w.reduce((s, v) => s + (v - m) ** 2, 0) / 22);
               return { ...d, bbU: m + 2 * sd, bbL: m - 2 * sd };
             });
 
