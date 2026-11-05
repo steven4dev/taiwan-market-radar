@@ -212,6 +212,10 @@ jobs:
         continue-on-error: true
         run: python3 scripts/update_sox.py
 
+      - name: Update backtest assets (M12)
+        continue-on-error: true
+        run: python3 scripts/update_assets.py
+
       - name: Commit & Push
         run: |
           git config user.name "github-actions[bot]"

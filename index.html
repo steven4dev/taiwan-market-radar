@@ -518,6 +518,20 @@
       const { useMemo, useRef, useCallback } = React;
       const [years, setYears] = useState(5);
       const [hov, setHov] = useState(null);
+      const ASSETS = [['TAIEX', '加權指數'], ['0050', '0050 元大台灣50'], ['006208', '006208 富邦台50'], ['0056', '0056 元大高股息'],
+        ['2330', '2330 台積電'], ['2317', '2317 鴻海'], ['2454', '2454 聯發科'], ['00631L', '00631L 台灣50正2'], ['00685L', '00685L 加權正2']];
+      const [asset, setAsset] = useState('TAIEX');
+      const [store, setStore] = useState({});            // code → {rows:[[date, 還原收盤]]} | 'loading' | 'error'
+      useEffect(() => {
+        if (asset === 'TAIEX' || store[asset]) return;
+        setStore(m => ({ ...m, [asset]: 'loading' }));
+        fetch(`./data/assets/${asset}.json`).then(x => { if (!x.ok) throw new Error(x.status); return x.json(); })
+          .then(j => setStore(m => ({ ...m, [asset]: j })))
+          .catch(() => setStore(m => ({ ...m, [asset]: 'error' })));
+      }, [asset]);
+      const assetLabel = ASSETS.find(a => a[0] === asset)[1];
+      const ast = asset === 'TAIEX' ? null : store[asset];
+      const assetStart = ast && ast.rows ? ast.rows[0][0] : null;
       const boxRef = useRef(null);
       const DAILY_FROM = '2021-11-01';          // 此日期之前的資料為每週一筆
 
@@ -541,22 +555,32 @@
           });
         };
         const ms = ma(MA_S), ml = ma(MA_L);
-        return rows.map((d, i) => ({ ...d, ms: ms[i], ml: ml[i] }));
-      }, [rows, MA_S, MA_L]);
+        let px = null;
+        if (asset !== 'TAIEX') {
+          const ar = ast && ast.rows ? ast.rows : [];
+          const at = ar.map(x => Date.parse(x[0]));
+          px = t.map(ti => {
+            let lo = 0, hi = at.length - 1, k = -1;
+            while (lo <= hi) { const mid = (lo + hi) >> 1; if (at[mid] <= ti) { k = mid; lo = mid + 1; } else hi = mid - 1; }
+            return k >= 0 && ti - at[k] <= 7 * DAY ? ar[k][1] : null;
+          });
+        }
+        return rows.map((d, i) => ({ ...d, ms: ms[i], ml: ml[i], price: px ? px[i] : d.index }));
+      }, [rows, MA_S, MA_L, asset, ast]);
       const trades = useMemo(() => {
         const t = withMa.map(d => Date.parse(d.date));
         const warm = t[0] + MA_L * DAY;
         const out = [];
         let hold = null;
         for (let i = 1; i < withMa.length; i++) {
-          if (t[i - 1] < warm || withMa[i].index == null) continue;
+          if (t[i - 1] < warm || withMa[i].price == null) continue;
           const a = withMa[i - 1].ms - withMa[i - 1].ml, b = withMa[i].ms - withMa[i].ml;
           if (a <= 0 && b > 0 && hold == null) hold = i;
           else if (a >= 0 && b < 0 && hold != null) { out.push({ i0: hold, i1: i, open: false }); hold = null; }
         }
         if (hold != null) out.push({ i0: hold, i1: withMa.length - 1, open: true });
         return out.map(x => {
-          const p0 = withMa[x.i0].index, p1 = withMa[x.i1].index;
+          const p0 = withMa[x.i0].price, p1 = withMa[x.i1].price;
           return { ...x, p0, p1, ret: (p1 / p0 - 1) * 100, d0: withMa[x.i0].date, d1: withMa[x.i1].date };
         });
       }, [withMa]);
@@ -587,7 +611,7 @@
         return { lo: mn - pd, hi: mx + pd };
       };
       const rs = scale(view.map(d => d.ratio));
-      const idxVals = view.map(d => d.index).filter(v => v != null);
+      const idxVals = view.map(d => d.price).filter(v => v != null);
       const is = idxVals.length ? scale(idxVals) : null;
       const mk = (key, sc) => {
         let path = '', started = false;
@@ -626,7 +650,10 @@
         total: (rets.reduce((e, r) => e * (1 + r / 100), 1) - 1) * 100,
         best: Math.max(...rets), worst: Math.min(...rets),
       } : null;
-      const bh = (view[0].index != null && last.index != null) ? (last.index / view[0].index - 1) * 100 : null;
+      const firstPx = view.find(d => d.price != null);
+      const bh = (firstPx && last.price != null) ? (last.price / firstPx.price - 1) * 100 : null;
+      const fmtP = v => (v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2));
+      const adjNote = asset === 'TAIEX' ? '收盤價' : '還原收盤價（含股息）';
       const sgp = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
       const rcl = v => (v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400');
       const tile = (label, value, sub) => (
@@ -673,7 +700,15 @@
                 </button>
               ))}
             </div>
-            <span className="text-xs text-gray-500">金叉買進、死叉賣出（以加權指數收盤計）· 連線＝一個波段</span>
+            <span className="text-xs text-gray-500 ml-1">買進標的</span>
+            <select value={asset} onChange={e => setAsset(e.target.value)}
+              className="bg-gray-900 border border-gray-700 text-gray-200 text-xs rounded-lg px-2 py-1.5">
+              {ASSETS.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
+            </select>
+            <span className="text-xs text-gray-500">金叉買進、死叉賣出（以{assetLabel}{adjNote}計）· 連線＝一個波段</span>
+            {ast === 'loading' && <span className="text-xs text-yellow-500">標的資料載入中…</span>}
+            {ast === 'error' && <span className="text-xs text-yellow-500">標的資料載入失敗</span>}
+            {assetStart && assetStart > view[0].date && <span className="text-xs text-yellow-500">標的資料自 {assetStart} 起</span>}
           </div>
           <div className="flex">
             <div className="relative flex-shrink-0 text-xs text-blue-400 select-none" style={{ width: '3.2rem', height: H }}>
@@ -689,12 +724,12 @@
                 {fr.map(f => (
                   <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
                 ))}
-                {is && <path d={mk('index', is)} fill="none" stroke="#f87171" strokeWidth="1.3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
+                {is && <path d={mk('price', is)} fill="none" stroke="#f87171" strokeWidth="1.3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
                 {is && vt.map((x, k) => {
                   const col = x.ret >= 0 ? '#ef4444' : '#22c55e';
                   const mag = Math.abs(x.ret);
                   const w = mag >= 15 ? 3.6 : mag >= 5 ? 2.8 : 2;
-                  const y0 = H * yI(view[x.a].index) / 100, y1 = H * yI(view[x.b].index) / 100;
+                  const y0 = H * yI(view[x.a].price) / 100, y1 = H * yI(view[x.b].price) / 100;
                   return (
                     <line key={'tr' + k} x1={fx(x.a) * W} y1={y0} x2={fx(x.b) * W} y2={y1} stroke={col} strokeWidth={w}
                       strokeLinecap="round" strokeDasharray={x.open ? '0.1 6' : '8 4'} vectorEffect="non-scaling-stroke" />
@@ -708,7 +743,7 @@
               {is && vt.map((x, k) => {
                 const col = x.ret >= 0 ? '#ef4444' : '#22c55e';
                 const label = `${x.ret >= 0 ? '+' : ''}${x.ret.toFixed(1)}%`;
-                const t0 = yI(view[x.a].index), t1 = yI(view[x.b].index);
+                const t0 = yI(view[x.a].price), t1 = yI(view[x.b].price);
                 const wide = fx(x.b) - fx(x.a) > 0.05;
                 return (
                   <React.Fragment key={'te' + k}>
@@ -747,14 +782,14 @@
                   <div className="text-gray-300">不含台積電 {hd.exTsmc.toFixed(2)}%</div>
                   <div className="text-yellow-400">{MA_S} 日均 {hd.ms.toFixed(2)}%</div>
                   <div className="text-purple-400">{MA_L} 日均 {hd.ml.toFixed(2)}%</div>
-                  <div className="text-red-400">加權指數 {hd.index != null ? hd.index.toLocaleString() : '—'}</div>
+                  <div className="text-red-400">{assetLabel} {hd.price != null ? fmtP(hd.price) : '—'}</div>
                 </div>
               )}
             </div>
             <div className="relative flex-shrink-0 text-xs text-red-400 select-none" style={{ width: '3.8rem', height: H }}>
               {is && fr.map(f => (
                 <span key={f} className="absolute left-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
-                  {Math.round(is.hi - f * (is.hi - is.lo)).toLocaleString()}
+                  {fmtP(is.hi - f * (is.hi - is.lo))}
                 </span>
               ))}
             </div>
@@ -787,7 +822,7 @@
           )}
           <p className="text-[11px] text-gray-500">
             {openT ? <>目前持有中：{openT.d0} 進場，帳面 <span className={rcl(openT.ret)}>{sgp(openT.ret)}</span>（未平倉不計入統計）。</> : '目前空手。'}
-            {' '}統計為「賣出日落在此區間」的已平倉波段，以加權指數收盤價計，未含手續費與稅；持股比重為盤後公布，實際進出約晚一個交易日。2021-11 之前為週資料，進出價有數日誤差。
+            {' '}統計為「賣出日落在此區間」的已平倉波段，以{assetLabel}{adjNote}計，未含手續費與稅；持股比重為盤後公布，實際進出約晚一個交易日。2021-11 之前為週資料，進出價有數日誤差。
           </p>
         </>
       );
