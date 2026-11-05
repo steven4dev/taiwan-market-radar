@@ -740,6 +740,25 @@
             {ast === 'error' && <span className="text-xs text-yellow-500">標的資料載入失敗</span>}
             {assetStart && assetStart > view[0].date && <span className="text-xs text-yellow-500">標的資料自 {assetStart} 起</span>}
           </div>
+          {st ? (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+              {tile('已平倉', `${st.count} 次`,
+                <><span className="text-red-400">獲利 {st.wins}</span>{' · '}<span className="text-green-400">虧損 {st.losses}</span></>)}
+              {tile('勝率', `${st.winRate.toFixed(0)}%`,
+                st.avgWin != null && st.avgLoss != null && st.avgLoss < 0
+                  ? `盈虧比 ${(st.avgWin / Math.abs(st.avgLoss)).toFixed(2)}` : '盈虧比 —')}
+              {tile('平均每筆',
+                <span className="text-sm"><span className={rcl(st.avgWin)}>{sgp(st.avgWin)}</span>{' / '}<span className={rcl(st.avgLoss)}>{sgp(st.avgLoss)}</span></span>,
+                '平均獲利 / 平均虧損')}
+              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>,
+                <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span></>)}
+              {tile('單筆極值',
+                <span className="text-sm"><span className={rcl(st.best)}>{sgp(st.best)}</span>{' / '}<span className={rcl(st.worst)}>{sgp(st.worst)}</span></span>,
+                '最佳 / 最差')}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 mb-3">此區間內沒有已平倉的波段。{bh != null && <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span>。</>}</p>
+          )}
           <div className="flex">
             {/* 左側座標軸 */}
             <div className="flex-shrink-0 select-none" style={{ width: '3.8rem' }}>
@@ -868,25 +887,6 @@
               </span>
             ))}
           </div>
-          {st ? (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3 mb-2">
-              {tile('已平倉', `${st.count} 次`,
-                <><span className="text-red-400">獲利 {st.wins}</span>{' · '}<span className="text-green-400">虧損 {st.losses}</span></>)}
-              {tile('勝率', `${st.winRate.toFixed(0)}%`,
-                st.avgWin != null && st.avgLoss != null && st.avgLoss < 0
-                  ? `盈虧比 ${(st.avgWin / Math.abs(st.avgLoss)).toFixed(2)}` : '盈虧比 —')}
-              {tile('平均每筆',
-                <span className="text-sm"><span className={rcl(st.avgWin)}>{sgp(st.avgWin)}</span>{' / '}<span className={rcl(st.avgLoss)}>{sgp(st.avgLoss)}</span></span>,
-                '平均獲利 / 平均虧損')}
-              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>,
-                <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span></>)}
-              {tile('單筆極值',
-                <span className="text-sm"><span className={rcl(st.best)}>{sgp(st.best)}</span>{' / '}<span className={rcl(st.worst)}>{sgp(st.worst)}</span></span>,
-                '最佳 / 最差')}
-            </div>
-          ) : (
-            <p className="text-xs text-gray-500 mt-3">此區間內沒有已平倉的波段。{bh != null && <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span>。</>}</p>
-          )}
           <p className="text-[11px] text-gray-500">
             {openT ? <>目前持有中：{openT.d0} 進場，帳面 <span className={rcl(openT.ret)}>{sgp(openT.ret)}</span>（未平倉不計入統計）。</> : '目前空手。'}
             {' '}統計為「賣出日落在此區間」的已平倉波段，以{assetLabel}{adjNote}計，未含手續費與稅；持股比重為盤後公布，實際進出約晚一個交易日。2021-11 之前持股比重為週資料，進出價有數日誤差。K 線依區間自動合併為日／週／月 K（紅漲綠跌）。
