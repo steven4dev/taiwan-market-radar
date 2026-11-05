@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.21';
+    const APP_VERSION = 'v 20261105.22';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -582,12 +582,33 @@
       const hd = hov != null ? view[hov] : null;
       const tipLeft = hov != null && fx(hov) > 0.6;
 
+      // 金叉／死叉：持股比重線（左軸）由下往上穿越加權指數線（右軸）＝金叉；由上往下＝死叉。
+      // 兩軸各自自動縮放，因此交會點依目前區間而定（只代表兩條線相對位置的轉換，不是絕對數值相等）。
+      const yRn = i => (view[i].ratio - rs.lo) / (rs.hi - rs.lo);
+      const yIn = i => (view[i].index - is.lo) / (is.hi - is.lo);
+      const crosses = [];
+      if (is) {
+        for (let i = 1; i < n; i++) {
+          if (view[i - 1].index == null || view[i].index == null) continue;
+          const d0 = yRn(i - 1) - yIn(i - 1), d1 = yRn(i) - yIn(i);
+          if ((d0 <= 0 && d1 > 0) || (d0 >= 0 && d1 < 0)) {
+            const tt = d0 / (d0 - d1);
+            crosses.push({ gold: d1 > 0, date: view[i].date, fx: fx(i - 1) + tt * (fx(i) - fx(i - 1)),
+              top: (1 - (yRn(i - 1) + tt * (yRn(i) - yRn(i - 1)))) * 100 });
+          }
+        }
+      }
+      const nGold = crosses.filter(c => c.gold).length;
+      const showLbl = crosses.length <= 24;
+
       return (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <p className="text-xs text-gray-400">
               最新 <span className="text-blue-400 font-bold">{last.ratio.toFixed(2)}%</span>（{last.date}）
               {' · '}區間高 {hiR.ratio.toFixed(2)}%（{hiR.date}）{' · '}區間低 {loR.ratio.toFixed(2)}%（{loR.date}）
+              {' · '}<span className="text-red-400">金叉 {nGold}</span> / <span className="text-green-400">死叉 {crosses.length - nGold}</span>
+              <span className="text-gray-500">（持股比重線穿越指數線；兩軸各自縮放，依區間而異）</span>
               {view[0].date < DAILY_FROM && <span className="text-gray-500">{' · '}{DAILY_FROM.slice(0, 7)} 之前為每週一筆</span>}
               {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {years} 年</span>}
             </p>
@@ -618,6 +639,21 @@
                 <path d={mk('ratio', rs)} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 {hov != null && <line x1={fx(hov) * W} x2={fx(hov) * W} y1="0" y2={H} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
               </svg>
+              {crosses.map((c, k) => {
+                const col = c.gold ? '#ef4444' : '#22c55e';
+                return (
+                  <div key={k} className="absolute pointer-events-none" title={`${c.date} ${c.gold ? '金叉' : '死叉'}`}
+                    style={{ left: `${c.fx * 100}%`, top: `${c.top}%`, transform: 'translate(-50%,-50%)' }}>
+                    <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#111827', border: `2.5px solid ${col}` }} />
+                    {showLbl && (
+                      <span className="absolute left-1/2 text-[10px] font-bold text-white rounded px-1 whitespace-nowrap"
+                        style={{ background: col, transform: 'translateX(-50%)', ...(c.gold ? { top: 14 } : { bottom: 14 }) }}>
+                        {c.gold ? '金叉' : '死叉'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
               {hd && (
                 <div className="absolute top-2 z-10 pointer-events-none bg-gray-900/90 border border-gray-600 rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-nowrap"
                   style={tipLeft ? { right: `${100 - fx(hov) * 100 + 1}%` } : { left: `${fx(hov) * 100 + 1}%` }}>
@@ -2429,6 +2465,8 @@
               legend: (<>
                 <span className="text-blue-400 whitespace-nowrap">— 左軸：持股比重</span>
                 <span className="text-red-400 whitespace-nowrap">- - 右軸：加權指數</span>
+                <span className="text-red-400 whitespace-nowrap">○ 金叉</span>
+                <span className="text-green-400 whitespace-nowrap">○ 死叉</span>
               </>),
               renderChart: () => <ForeignLongChart rows={rows} />,
             }}));
