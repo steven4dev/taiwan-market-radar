@@ -256,6 +256,36 @@
       const path = key => data.map((d, i) => `${i ? 'L' : 'M'} ${xAt(i)} ${yK(d[key])}`).join(' ');
       const pricePath = data.map((d, i) => `${i ? 'L' : 'M'} ${xAt(i)} ${yP(d.close)}`).join(' ');
 
+      // 金叉／死叉：KD＝K 與 D 交叉；柱體＝DIF 與訊號線交叉（柱體正負轉換）。紅＝金叉、綠＝死叉
+      const showLbl = n <= 140;
+      const kdX = [], macdX = [];
+      for (let i = 1; i < n; i++) {
+        const a = data[i - 1].k - data[i - 1].d, b = data[i].k - data[i].d;
+        if (a <= 0 && b > 0) kdX.push({ i, gold: true });
+        else if (a >= 0 && b < 0) kdX.push({ i, gold: false });
+        const ha = data[i - 1].hist, hb = data[i].hist;
+        if (ha <= 0 && hb > 0) macdX.push({ i, gold: true });
+        else if (ha >= 0 && hb < 0) macdX.push({ i, gold: false });
+      }
+      const xMark = (key, x, y, gold, up) => {
+        const col = gold ? '#ef4444' : '#22c55e';
+        const txt = gold ? '金叉' : '死叉';
+        const tw = 28, th = 13;
+        const ty = up ? y - 8 - th : y + 8;
+        return (
+          <g key={key}>
+            <line x1={x} x2={x} y1={y - 12} y2={y + 12} stroke={col} strokeWidth="1" strokeDasharray="2 2" opacity="0.7" />
+            <circle cx={x} cy={y} r="4.5" fill="#111827" stroke={col} strokeWidth="2" />
+            {showLbl && (
+              <g>
+                <rect x={x - tw / 2} y={ty} width={tw} height={th} rx="3" fill={col} />
+                <text x={x} y={ty + 10} fontSize="10" fill="#fff" textAnchor="middle" fontWeight="700">{txt}</text>
+              </g>
+            )}
+          </g>
+        );
+      };
+
       return (
         <svg viewBox={`0 0 ${W} ${H + 16}`} className="w-full block">
           <text x="2" y="11" fontSize={fs} fill="#6b7280">加權指數</text>
@@ -301,6 +331,8 @@
               width={dx * 0.76} height={h} fill={d.hist >= 0 ? '#ef4444' : '#22c55e'} opacity="0.85" />;
           })}
 
+          {macdX.map(c => xMark('mx' + c.i, xAt(c.i), hMid, c.gold, c.gold))}
+
           <text x="2" y={kY0 + 11} fontSize={fs} fill="#6b7280">KD (9,3,3)</text>
           {[20, 80].map(v => (
             <g key={v}>
@@ -310,6 +342,13 @@
           ))}
           <path d={path('d')} fill="none" stroke="#38bdf8" strokeWidth="1.3" strokeLinejoin="round" />
           <path d={path('k')} fill="none" stroke="#facc15" strokeWidth="1.3" strokeLinejoin="round" />
+          {kdX.map(c => xMark('kx' + c.i, xAt(c.i), yK(data[c.i].k), c.gold, !c.gold))}
+          <g fontSize={fs}>
+            <circle cx={W - 118} cy={kY0 + 8} r="4" fill="#111827" stroke="#ef4444" strokeWidth="2" />
+            <text x={W - 110} y={kY0 + 12} fill="#ef4444">金叉 {kdX.filter(c => c.gold).length}</text>
+            <circle cx={W - 58} cy={kY0 + 8} r="4" fill="#111827" stroke="#22c55e" strokeWidth="2" />
+            <text x={W - 50} y={kY0 + 12} fill="#22c55e">死叉 {kdX.filter(c => !c.gold).length}</text>
+          </g>
 
           <text x="0" y={H + 13} fontSize={fs} fill="#6b7280">{data[0].date}</text>
           <text x={W} y={H + 13} fontSize={fs} fill="#6b7280" textAnchor="end">{data[n - 1].date}</text>
