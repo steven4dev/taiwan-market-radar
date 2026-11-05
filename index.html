@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.23';
+    const APP_VERSION = 'v 20261105.24';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -1056,13 +1056,16 @@
           {showTable && grid.length > 0 && (() => {
             const SORTS = [['total', '累計報酬'], ['excess', '勝過買進持有'], ['dd', '回撤最小'], ['ratio', '報酬回撤比']];
             const val = (g, k) => (k === 'dd' ? g.dd : g[k]);
+            // 名次依目前排序鍵由高到低；已平倉不足 MIN_N 次（樣本少）或該指標無值的列排在最後、不列名次
+            const okRow = g => g.n >= MIN_N && val(g, sortKey) != null;
             const sorted = [...grid].sort((a, b) => {
-              const va = val(a, sortKey), vb = val(b, sortKey);
-              if (va == null && vb == null) return 0;
-              if (va == null) return 1;
-              if (vb == null) return -1;
-              return vb - va;
+              const oa = okRow(a), ob = okRow(b);
+              if (oa !== ob) return oa ? -1 : 1;
+              if (!oa) return 0;
+              return val(b, sortKey) - val(a, sortKey);
             });
+            const rankedVals = sorted.filter(okRow).map(g => val(g, sortKey));
+            const rankOf = g => 1 + rankedVals.filter(v => v > val(g, sortKey)).length;   // 同值同名次
             const tag = (txt, cls) => <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] border whitespace-nowrap ${cls}`}>{txt}</span>;
             return (
               <div className="mb-3 bg-gray-900/40 border border-gray-700 rounded-lg p-3">
@@ -1079,7 +1082,7 @@
                   <table className="w-full text-xs text-gray-300 whitespace-nowrap">
                     <thead>
                       <tr className="text-gray-500 text-left border-b border-gray-700">
-                        <th className="py-1 pr-3 font-normal">標的</th><th className="pr-3 font-normal">均線</th>
+                        <th className="py-1 pr-3 font-normal text-right">名次</th><th className="pr-3 font-normal">標的</th><th className="pr-3 font-normal">均線</th>
                         <th className="pr-3 font-normal text-right">已平倉</th><th className="pr-3 font-normal text-right">勝率</th>
                         <th className="pr-3 font-normal text-right">累計報酬</th><th className="pr-3 font-normal text-right">買進持有</th>
                         <th className="pr-3 font-normal text-right">差</th><th className="pr-3 font-normal text-right">最大回撤</th><th className="font-normal"></th>
@@ -1091,7 +1094,8 @@
                         const small = g.n < MIN_N;
                         return (
                           <tr key={g.code + g.pk} className={`border-b border-gray-800 ${cur ? 'bg-blue-900/30' : ''} ${small ? 'opacity-60' : ''}`}>
-                            <td className="py-1 pr-3 text-white">{g.short}
+                            <td className="py-1 pr-3 text-right text-gray-400">{okRow(g) ? rankOf(g) : '—'}</td>
+                            <td className="pr-3 text-white">{g.short}
                               {(() => {
                                 const k = rankTotal.findIndex(x => x.code === g.code && x.pk === g.pk);
                                 return k >= 0 && k < 3 ? tag(MEDALS[k] + ' ' + ['冠軍', '亞軍', '季軍'][k], ['border-yellow-600 text-yellow-300', 'border-gray-400 text-gray-200', 'border-orange-700 text-orange-300'][k]) : null;
@@ -1114,7 +1118,7 @@
                     </tbody>
                   </table>
                 </div>
-                <p className="mt-2 text-[11px] text-gray-500">差＝累計報酬 − 同標的同區間買進持有（正值＝勝過買進持有）。最大回撤取區間內含持有中未實現損益的權益曲線。灰色列為已平倉不足 {MIN_N} 次。</p>
+                <p className="mt-2 text-[11px] text-gray-500">差＝累計報酬 − 同標的同區間買進持有（正值＝勝過買進持有）。最大回撤取區間內含持有中未實現損益的權益曲線。名次依上方所選的排序鍵；灰色列為已平倉不足 {MIN_N} 次（樣本少），排在最後、不列名次。</p>
               </div>
             );
           })()}
