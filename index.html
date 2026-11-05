@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.18';
+    const APP_VERSION = 'v 20261105.19';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -647,6 +647,60 @@
       );
     };
 
+    // M13 回測核心：金叉買進、死叉賣出（空手才買、持有才賣；以當日還原收盤價進出）。
+    // t＝各列時間戳；ms／ml＝短／長均線；px＝標的價格（可含 null）；warm＝均線成形後才開始計。
+    // 回傳 trades 與逐列權益曲線 eq（含持有中的未實現損益），供統計與最大回撤使用。
+    const simulateTiming = (t, ms, ml, px, warm) => {
+      const trades = [], eq = new Array(t.length).fill(1);
+      let hold = null, entry = null, prod = 1, lastPx = null;
+      for (let i = 0; i < t.length; i++) {
+        const p = px[i];
+        if (p != null) lastPx = p;
+        if (i > 0 && t[i - 1] >= warm && p != null) {
+          const a = ms[i - 1] - ml[i - 1], b = ms[i] - ml[i];
+          if (a <= 0 && b > 0 && hold == null) { hold = i; entry = p; }
+          else if (a >= 0 && b < 0 && hold != null) {
+            trades.push({ i0: hold, i1: i, open: false, p0: entry, p1: p, ret: (p / entry - 1) * 100 });
+            prod *= p / entry; hold = null; entry = null;
+          }
+        }
+        eq[i] = prod * (hold != null && lastPx != null ? lastPx / entry : 1);
+      }
+      if (hold != null && lastPx != null) trades.push({ i0: hold, i1: t.length - 1, open: true, p0: entry, p1: lastPx, ret: (lastPx / entry - 1) * 100 });
+      return { trades, eq };
+    };
+    // 區間統計：賣出日落在 [off, 末] 的已平倉波段；買進持有自區間內第一個有價格的列起算；最大回撤取區間內權益曲線。
+    const windowStatsTiming = (sim, px, off) => {
+      const closed = sim.trades.filter(x => !x.open && x.i1 >= off);
+      const n = closed.length, wins = closed.filter(x => x.ret > 0).length;
+      const total = (closed.reduce((e, x) => e * (1 + x.ret / 100), 1) - 1) * 100;
+      let first = null;
+      for (let i = off; i < px.length; i++) { if (px[i] != null) { first = px[i]; break; } }
+      const lastP = px[px.length - 1];
+      const bh = first != null && lastP != null ? (lastP / first - 1) * 100 : null;
+      let peak = sim.eq[off], dd = 0;
+      for (let i = off; i < sim.eq.length; i++) { peak = Math.max(peak, sim.eq[i]); dd = Math.min(dd, sim.eq[i] / peak - 1); }
+      dd *= 100;
+      return { n, wins, winRate: n ? wins / n * 100 : null, total, bh, excess: bh != null ? total - bh : null, dd, ratio: dd < 0 ? total / Math.abs(dd) : null };
+    };
+    const pctTxt = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${Math.round(v)}%`);
+    const carryPrice = (t, arows) => {
+      const at = arows.map(x => Date.parse(x[0]));
+      return t.map(ti => {
+        let lo = 0, hi = at.length - 1, k = -1;
+        while (lo <= hi) { const mid = (lo + hi) >> 1; if (at[mid] <= ti) { k = mid; lo = mid + 1; } else hi = mid - 1; }
+        return k >= 0 && ti - at[k] <= 7 * 864e5 ? arows[k][4] : null;
+      });
+    };
+    const calMaRatio = (rows, t, W) => {
+      let j = 0, sum = 0;
+      return rows.map((d, i) => {
+        sum += d.ratio;
+        while (t[j] <= t[i] - W * 864e5) { sum -= rows[j].ratio; j++; }
+        return sum / (i - j + 1);
+      });
+    };
+
     // M13 圖表：上方為所選標的的 K 線（還原價）＋波段連線與買賣標記，下方為外資持股比重與 30／90 日均線＋金叉死叉。
     // 兩個副圖共用同一條時間軸（依日期比例排列）。
     const ForeignTimingChart = ({ rows, expanded, head }) => {
@@ -658,12 +712,15 @@
       const [asset, setAsset] = useState('TAIEX');
       const [store, setStore] = useState({});            // code → {rows:[[date,o,h,l,c]]} | 'loading' | 'error'
       useEffect(() => {
-        if (store[asset]) return;
-        setStore(m => ({ ...m, [asset]: 'loading' }));
-        fetch(`./data/assets/${asset}.json`).then(x => { if (!x.ok) throw new Error(x.status); return x.json(); })
-          .then(j => setStore(m => ({ ...m, [asset]: j })))
-          .catch(() => setStore(m => ({ ...m, [asset]: 'error' })));
-      }, [asset]);
+        ASSETS.forEach(([code]) => {
+          setStore(m => (m[code] ? m : { ...m, [code]: 'loading' }));
+          fetch(`./data/assets/${code}.json`).then(x => { if (!x.ok) throw new Error(x.status); return x.json(); })
+            .then(j => setStore(m => ({ ...m, [code]: j })))
+            .catch(() => setStore(m => ({ ...m, [code]: 'error' })));
+        });
+      }, []);
+      const [showTable, setShowTable] = useState(false);
+      const [sortKey, setSortKey] = useState('total');
       const assetLabel = ASSETS.find(a => a[0] === asset)[1];
       const ast = store[asset];
       const arows = ast && ast.rows ? ast.rows : null;
@@ -721,6 +778,36 @@
       const covered = rows[0].date <= cutoff;
       const n = view.length;
       const ts = useMemo(() => view.map(d => Date.parse(d.date)), [view]);
+
+      // 全部「標的 × 均線參數」組合在目前區間的成績（回測結果與下方統計方塊同一套計算）
+      const grid = useMemo(() => {
+        const t = rows.map(d => Date.parse(d.date));
+        const offG = Math.max(0, rows.findIndex(d => d.date >= cutoff));
+        const mas = PRESETS.map(([S, L]) => [calMaRatio(rows, t, S), calMaRatio(rows, t, L), L]);
+        const out = [];
+        for (const [code, label, short] of ASSETS) {
+          const a = store[code];
+          if (!a || !a.rows) continue;
+          const px = carryPrice(t, a.rows);
+          PRESETS.forEach(([S, L], pk) => {
+            const sim = simulateTiming(t, mas[pk][0], mas[pk][1], px, t[0] + L * DAY);
+            out.push({ code, label, short, pk, S, L, ...windowStatsTiming(sim, px, offG) });
+          });
+        }
+        return out;
+      }, [rows, store, cutoff]);
+      const loadedCnt = ASSETS.filter(([c]) => store[c] && store[c].rows).length;
+      const MIN_N = 3;                                   // 已平倉少於 3 次不參與標記（樣本太少）
+      const valid = grid.filter(g => g.n >= MIN_N);
+      const pick = (arr, f) => arr.reduce((m, g) => (m == null || f(g) > f(m) ? g : m), null);
+      const bestTotal = pick(valid, g => g.total);
+      const bestDD = pick(valid, g => g.dd);
+      const bestRatio = pick(valid.filter(g => g.ratio != null), g => g.ratio);
+      const isSame = (a, b) => a && b && a.code === b.code && a.pk === b.pk;
+      const beatCnt = grid.filter(g => g.excess != null && g.excess > 0).length;
+      const gridOf = (code, pk) => grid.find(g => g.code === code && g.pk === pk);
+      // 資料起點晚於區間起點的標的：實際回測期間較短，與其他標的的報酬不宜直接比較
+      const shortList = ASSETS.filter(([c]) => store[c] && store[c].rows && store[c].rows[0][0] > view[0].date).map(a => a[2]);
 
       // K 棒：依根數自動選日／週／月 K（日 K ≤320 根；週 K ≤600 根；其餘月 K）
       const { bars, mode } = useMemo(() => {
@@ -857,12 +944,16 @@
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <span className="text-xs text-gray-500">均線參數</span>
             <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
-              {PRESETS.map(([a, b], k) => (
-                <button key={k} title={`${a} 日均線穿越 ${b} 日均線：金叉買進、死叉賣出`} onClick={() => setPi(k)}
-                  className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${pi === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-                  {a}／{b}
-                </button>
-              ))}
+              {PRESETS.map(([a, b], k) => {
+                const g = gridOf(asset, k);
+                const best = valid.filter(x => x.code === asset).reduce((m, x) => (m == null || x.total > m.total ? x : m), null);
+                return (
+                  <button key={k} title={`${a} 日均線穿越 ${b} 日均線：金叉買進、死叉賣出${g ? `\n此區間（${assetLabel}）累計 ${pctTxt(g.total)}，已平倉 ${g.n} 次` : ''}`} onClick={() => setPi(k)}
+                    className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${pi === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                    {best && best.pk === k ? '🏆 ' : ''}{a}／{b}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
+                  </button>
+                );
+              })}
             </div>
             <span className="text-xs text-gray-500">金叉買進、死叉賣出（以{assetLabel}{adjNote}計）· 連線＝一個波段</span>
             {ast === 'loading' && <span className="text-xs text-yellow-500">標的資料載入中…</span>}
@@ -871,12 +962,17 @@
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mb-3">
             <span className="text-xs text-gray-500 mr-1">買進標的</span>
-            {ASSETS.map(([c, l, short]) => (
-              <button key={c} title={l} onClick={() => setAsset(c)}
-                className={`px-3 py-1 rounded-full text-xs border whitespace-nowrap transition-colors ${asset === c ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-                {short}
-              </button>
-            ))}
+            {ASSETS.map(([c, l, short]) => {
+              const g = gridOf(c, pi);
+              const bestA = valid.filter(x => x.pk === pi).reduce((m, x) => (m == null || x.total > m.total ? x : m), null);
+              return (
+                <button key={c} title={`${l}${g ? `\n此區間（${PRESETS[pi][0]}／${PRESETS[pi][1]}）累計 ${pctTxt(g.total)}，買進持有 ${pctTxt(g.bh)}，已平倉 ${g.n} 次` : ''}`} onClick={() => setAsset(c)}
+                  className={`px-3 py-1 rounded-full text-xs border whitespace-nowrap transition-colors ${asset === c ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                  {bestA && bestA.code === c ? '🏆 ' : ''}{short}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
+                </button>
+              );
+            })}
+            {loadedCnt < ASSETS.length && <span className="text-xs text-yellow-500">載入中 {loadedCnt}／{ASSETS.length}</span>}
           </div>
           {st ? (
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
@@ -897,6 +993,84 @@
           ) : (
             <p className="text-xs text-gray-500 mb-3">此區間內沒有已平倉的波段。{bh != null && <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span>。</>}</p>
           )}
+          {grid.length > 0 && (
+            <div className="mb-3 text-xs text-gray-300 bg-gray-900/50 border border-gray-700 rounded-lg px-3 py-2 leading-relaxed">
+              此區間 {grid.length} 組（{loadedCnt} 個標的 × {PRESETS.length} 組均線）中，
+              {beatCnt > 0
+                ? <><span className="text-red-400 font-bold">{beatCnt} 組</span>勝過買進持有</>
+                : <span className="text-yellow-400 font-bold">沒有任何一組勝過買進持有</span>}
+              {bestTotal && <>；累計報酬最高：<span className="text-white font-bold">{bestTotal.short}＋{bestTotal.S}／{bestTotal.L}</span>（<span className={bestTotal.total >= 0 ? 'text-red-400' : 'text-green-400'}>{pctTxt(bestTotal.total)}</span>
+                {bestTotal.bh != null && <>，同標的買進持有 {pctTxt(bestTotal.bh)}</>}）</>}
+              {bestDD && <>；回撤最小：<span className="text-white font-bold">{bestDD.short}＋{bestDD.S}／{bestDD.L}</span>（{bestDD.dd.toFixed(0)}%）</>}。
+              <button onClick={() => setShowTable(v => !v)} className="ml-2 text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline">
+                {showTable ? '收起對照表 ▲' : `展開 ${grid.length} 組對照表 ▼`}
+              </button>
+              <p className="mt-1 text-[11px] text-gray-500">「最佳」是事後挑選：換個區間排名可能完全不同，不代表之後有效；已平倉少於 {MIN_N} 次的組合不參與標記；未含手續費與稅。
+                {shortList.length > 0 && <span className="text-yellow-500">{' '}{shortList.join('、')} 資料不足整個區間，實際回測期間較短，報酬不宜與其他標的直接比較。</span>}</p>
+            </div>
+          )}
+          {showTable && grid.length > 0 && (() => {
+            const SORTS = [['total', '累計報酬'], ['excess', '勝過買進持有'], ['dd', '回撤最小'], ['ratio', '報酬回撤比']];
+            const val = (g, k) => (k === 'dd' ? g.dd : g[k]);
+            const sorted = [...grid].sort((a, b) => {
+              const va = val(a, sortKey), vb = val(b, sortKey);
+              if (va == null && vb == null) return 0;
+              if (va == null) return 1;
+              if (vb == null) return -1;
+              return vb - va;
+            });
+            const tag = (txt, cls) => <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] border whitespace-nowrap ${cls}`}>{txt}</span>;
+            return (
+              <div className="mb-3 bg-gray-900/40 border border-gray-700 rounded-lg p-3">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-xs text-gray-500">排序</span>
+                  <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
+                    {SORTS.map(([k, l]) => (
+                      <button key={k} onClick={() => setSortKey(k)}
+                        className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${sortKey === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-gray-300 whitespace-nowrap">
+                    <thead>
+                      <tr className="text-gray-500 text-left border-b border-gray-700">
+                        <th className="py-1 pr-3 font-normal">標的</th><th className="pr-3 font-normal">均線</th>
+                        <th className="pr-3 font-normal text-right">已平倉</th><th className="pr-3 font-normal text-right">勝率</th>
+                        <th className="pr-3 font-normal text-right">累計報酬</th><th className="pr-3 font-normal text-right">買進持有</th>
+                        <th className="pr-3 font-normal text-right">差</th><th className="pr-3 font-normal text-right">最大回撤</th><th className="font-normal"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sorted.map(g => {
+                        const cur = g.code === asset && g.pk === pi;
+                        const small = g.n < MIN_N;
+                        return (
+                          <tr key={g.code + g.pk} className={`border-b border-gray-800 ${cur ? 'bg-blue-900/30' : ''} ${small ? 'opacity-60' : ''}`}>
+                            <td className="py-1 pr-3 text-white">{g.short}
+                              {isSame(g, bestTotal) && tag('🏆 報酬最高', 'border-yellow-600 text-yellow-300')}
+                              {isSame(g, bestDD) && tag('🛡 回撤最小', 'border-sky-600 text-sky-300')}
+                              {isSame(g, bestRatio) && tag('⚖ 報酬回撤比最佳', 'border-purple-600 text-purple-300')}
+                            </td>
+                            <td className="pr-3">{g.S}／{g.L}</td>
+                            <td className="pr-3 text-right">{g.n}{small && <span className="text-gray-500">（樣本少）</span>}</td>
+                            <td className="pr-3 text-right">{g.winRate != null ? g.winRate.toFixed(0) + '%' : '—'}</td>
+                            <td className={`pr-3 text-right font-bold ${g.total >= 0 ? 'text-red-400' : 'text-green-400'}`}>{pctTxt(g.total)}</td>
+                            <td className="pr-3 text-right">{pctTxt(g.bh)}</td>
+                            <td className={`pr-3 text-right ${g.excess > 0 ? 'text-red-400' : 'text-green-400'}`}>{g.excess != null ? pctTxt(g.excess) : '—'}</td>
+                            <td className="pr-3 text-right">{g.dd.toFixed(0)}%</td>
+                            <td>{cur ? <span className="text-blue-400">目前</span>
+                              : <button onClick={() => { setAsset(g.code); setPi(g.pk); }} className="px-2 py-0.5 rounded border border-gray-600 text-gray-300 hover:text-white hover:border-blue-500">套用</button>}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[11px] text-gray-500">差＝累計報酬 − 同標的同區間買進持有（正值＝勝過買進持有）。最大回撤取區間內含持有中未實現損益的權益曲線。灰色列為已平倉不足 {MIN_N} 次。</p>
+              </div>
+            );
+          })()}
           {expanded && (
             <>
               {head}
