@@ -70,7 +70,11 @@ def merge(old, new):
     return merged, factor
 
 
-def clean(series):
+# 槓桿型 ETF 單日最多約 ±20%（指數漲跌停 10% × 2），門檻需放寬，避免把真實的重挫當成瑕疵抹平
+LEVERAGED = {'00631L', '00685L'}
+
+
+def clean(series, lo_hi=(0.8, 1.25)):
     """修正未還原的分割／面額變更：台股單日漲跌幅上限為 7～10%，任何單日收盤變動超過 -20%／+25%
     必為資料瑕疵（例如 0050 在 2014-01 單日 -75%）。以接點比值把更早的資料整段往後接齊，
     使價格連續；代價是該日 ≤10% 的真實漲跌被抹平。回傳 (修正後, 修正清單)。"""
@@ -80,7 +84,7 @@ def clean(series):
     for i in range(len(dates) - 1, 0, -1):          # 由新到舊，逐段把舊資料縮放到與新資料連續
         d0, d1 = dates[i - 1], dates[i]
         r = vals[d1][3] / vals[d0][3]
-        if r < 0.8 or r > 1.25:
+        if r < lo_hi[0] or r > lo_hi[1]:
             for k in range(i):
                 vals[dates[k]] = scale(vals[dates[k]], r)
             fixes.append((d0, d1, r))
@@ -105,7 +109,7 @@ def main():
             if len(new) < 20:
                 raise RuntimeError(f'僅取得 {len(new)} 筆')
             merged, factor = merge(old, new)
-            merged, fixes = clean(merged)
+            merged, fixes = clean(merged, (0.7, 1.4) if code in LEVERAGED else (0.8, 1.25))
             rows = [[d] + [round(v, 4) for v in merged[d]] for d in sorted(merged) if d >= KEEP_FROM]
             with open(path, 'w', encoding='utf-8') as fp:
                 json.dump({'code': code, 'label': label, 'rows': rows}, fp, ensure_ascii=False, separators=(',', ':'))
