@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.35';
+    const APP_VERSION = 'v 20261105.36';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -263,6 +263,7 @@
 
       // 金叉／死叉：KD＝K 與 D 交叉；柱體＝DIF 與訊號線交叉（柱體正負轉換）。紅＝金叉、綠＝死叉
       const showLbl = n <= 140;
+      const showX = n <= 260;   // 區間超過約 1 年時交叉點過密，不畫圓點（右上角仍顯示次數）
       const kdX = [], macdX = [];
       for (let i = 1; i < n; i++) {
         const a = data[i - 1].k - data[i - 1].d, b = data[i].k - data[i].d;
@@ -336,7 +337,7 @@
               width={dx * 0.76} height={h} fill={d.hist >= 0 ? '#ef4444' : '#22c55e'} opacity="0.85" />;
           })}
 
-          {macdX.map(c => xMark('mx' + c.i, xAt(c.i), hMid, c.gold, c.gold))}
+          {showX && macdX.map(c => xMark('mx' + c.i, xAt(c.i), hMid, c.gold, c.gold))}
 
           <text x="2" y={kY0 + 11} fontSize={fs} fill="#6b7280">KD (9,3,3)</text>
           {[20, 80].map(v => (
@@ -347,7 +348,7 @@
           ))}
           <path d={path('d')} fill="none" stroke="#38bdf8" strokeWidth="1.3" strokeLinejoin="round" />
           <path d={path('k')} fill="none" stroke="#facc15" strokeWidth="1.3" strokeLinejoin="round" />
-          {kdX.map(c => xMark('kx' + c.i, xAt(c.i), yK(data[c.i].k), c.gold, !c.gold))}
+          {showX && kdX.map(c => xMark('kx' + c.i, xAt(c.i), yK(data[c.i].k), c.gold, !c.gold))}
           <g fontSize={fs}>
             <circle cx={W - 118} cy={kY0 + 8} r="4" fill="#111827" stroke="#ef4444" strokeWidth="2" />
             <text x={W - 110} y={kY0 + 12} fill="#ef4444">金叉 {kdX.filter(c => c.gold).length}</text>
@@ -388,10 +389,10 @@
           {base}{info[strat]}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-gray-500">買賣策略</span>
-            <div className="inline-flex flex-wrap max-w-full rounded-2xl bg-gray-900 border border-gray-700 p-0.5 text-xs">
+            <div className="flex flex-wrap gap-1">
               {OPTS.map(([k, label, tip]) => (
                 <button key={k} title={tip} onClick={() => setStrat(k)}
-                  className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${strat === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                  className={`px-3 py-1 rounded-md text-xs border whitespace-nowrap transition-colors ${strat === k ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
                   {label}
                 </button>
               ))}
@@ -404,22 +405,18 @@
     // M11 面板：區間切換 + 勝率/輸贏統計 + 圖表
     const M11Panel = ({ td, expanded, head }) => {
       const { useMemo } = React;
-      const [rangeKey, setRangeKey] = useState('r120');
+      const [rangeKey, setRangeKey] = useState('y0.5');
       const [strat] = useM11Strategy();
       const sigKey = strat === 'conv' ? 'sigConv' : 'sigCross';
       const WARM = 140;                       // 慢線 EMA130 暖機期，其前的訊號不計
       const n = td.length;
       // 日 = 交易日筆數；年 = 日曆年限（自最新日期往前推 N 年）
-      const RANGES = [
-        { key: 'r60', label: '近 60 日', rows: 60 }, { key: 'r120', label: '近 120 日', rows: 120 },
-        { key: 'y1', label: '近 1 年', years: 1 }, { key: 'y3', label: '近 3 年', years: 3 },
-        { key: 'all', label: '全部', all: true },
-      ];
+      const RANGES = [0.5, 1, 2, 3, 5, 10].map(y => ({ key: `y${y}`, label: y === 0.5 ? '半年' : `${y} 年`, years: y }));
       const calcSize = r => {
         if (r.all) return n - WARM;
         if (r.years) {
           const d = new Date(td[n - 1].date);
-          d.setFullYear(d.getFullYear() - r.years);
+          d.setMonth(d.getMonth() - Math.round(r.years * 12));
           const cut = d.toISOString().slice(0, 10);
           let i = 0;
           while (i < n && td[i].date < cut) i++;
@@ -430,7 +427,7 @@
       const cur = RANGES.find(r => r.key === rangeKey) || RANGES[1];
       const size = Math.max(2, Math.min(calcSize(cur), n - WARM));
 
-      const { view, trades, stats, openTrade } = useMemo(() => {
+      const { view, trades, stats, bh, openTrade } = useMemo(() => {
         const viewStart = n - size;
         const raw = [];
         let oi = null;
@@ -458,7 +455,8 @@
           total: (rets.reduce((e, r) => e * (1 + r / 100), 1) - 1) * 100,
           best: Math.max(...rets), worst: Math.min(...rets),
         } : null;
-        return { view: td.slice(viewStart).map(d => ({ ...d, signal: d[sigKey] })), trades, stats, openTrade: trades.find(t => t.open) || null };
+        const bh = (td[n - 1].close / td[viewStart].close - 1) * 100;   // 區間首日收盤買進、持有到最新一日
+        return { view: td.slice(viewStart).map(d => ({ ...d, signal: d[sigKey] })), trades, stats, bh, openTrade: trades.find(t => t.open) || null };
       }, [td, size, sigKey]);
 
       const sg = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
@@ -490,7 +488,7 @@
             </div>
           </div>
           {stats ? (
-            <div className={`grid grid-cols-2 ${expanded ? 'md:grid-cols-5' : ''} gap-2 mb-2`}>
+            <div className={`grid grid-cols-2 ${expanded ? 'md:grid-cols-6' : ''} gap-2 mb-2`}>
               {tile('已平倉', `${stats.count} 次`,
                 <><span className="text-red-400">獲利 {stats.wins}</span>{' · '}<span className="text-green-400">虧損 {stats.losses}</span></>)}
               {tile('勝率', `${stats.winRate.toFixed(0)}%`,
@@ -500,6 +498,7 @@
                 <span className="text-sm"><span className={rc(stats.avgWin)}>{sg(stats.avgWin)}</span>{' / '}<span className={rc(stats.avgLoss)}>{sg(stats.avgLoss)}</span></span>,
                 '平均獲利 / 平均虧損')}
               {tile('累計報酬', <span className={rc(stats.total)}>{sg(stats.total)}</span>, '各波段依序複利')}
+              {tile('買進持有', <span className={rc(bh)}>{sg(bh)}</span>, '區間首日買進抱到最新')}
               {tile('單筆極值',
                 <span className="text-sm"><span className={rc(stats.best)}>{sg(stats.best)}</span>{' / '}<span className={rc(stats.worst)}>{sg(stats.worst)}</span></span>,
                 '最佳 / 最差')}
@@ -517,6 +516,10 @@
               {head}
               <div className="md:hidden"><M11Chart data={view} trades={trades} /></div>
               <div className="hidden md:block"><M11Chart data={view} trades={trades} wide /></div>
+              <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+                <span className="text-red-400">金叉</span>／<span className="text-green-400">死叉</span>：KD 區 K 值由下往上穿越 D 值為金叉（短線轉強）、由上往下穿越為死叉（短線轉弱）；
+                柱體區為 MACD 的 DIF 穿越訊號線，即柱體由負轉正為金叉、由正轉負為死叉（「舊｜正負轉換」策略即依此買賣）。交叉只代表動能轉向，需搭配趨勢判斷。
+              </p>
             </>
           )}
         </>
@@ -700,7 +703,7 @@
 
       const cutoff = useMemo(() => {
         const d = new Date(rows[rows.length - 1].date);
-        d.setFullYear(d.getFullYear() - years);
+        d.setMonth(d.getMonth() - Math.round(years * 12));
         return d.toISOString().slice(0, 10);
       }, [rows, years]);
       const view = useMemo(() => rows.filter(d => d.date >= cutoff), [rows, cutoff]);
@@ -718,7 +721,7 @@
         setHov(Math.abs(ts[lo] - target) <= Math.abs(ts[hi] - target) ? lo : hi);
       }, [ts]);
 
-      const RANGES = [{ label: '1 年', y: 1 }, { label: '3 年', y: 3 }, { label: '5 年', y: 5 }, { label: '10 年', y: 10 }, { label: '15 年', y: 15 }];
+      const RANGES = [0.5, 1, 2, 3, 5, 10].map(y => ({ label: y === 0.5 ? '半年' : `${y} 年`, y }));
       if (n < 2) return <p className="text-gray-500 text-sm text-center py-6">資料不足。</p>;
 
       const W = 1000, H = 300;
@@ -936,7 +939,7 @@
 
       const cutoff = useMemo(() => {
         const d = new Date(rows[rows.length - 1].date);
-        d.setFullYear(d.getFullYear() - years);
+        d.setMonth(d.getMonth() - Math.round(years * 12));
         return d.toISOString().slice(0, 10);
       }, [rows, years]);
       const DAY = 864e5;
@@ -1153,15 +1156,15 @@
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="text-xs text-gray-500">均線參數</span>
-            <div className="inline-flex flex-wrap max-w-full rounded-2xl bg-gray-900 border border-gray-700 p-0.5 text-xs">
-              {PRESETS.map(([a, b], k) => {
+            <span className="text-xs text-gray-500 w-full sm:w-auto">均線參數</span>
+            <div className="grid grid-cols-3 gap-1 w-full sm:flex sm:w-auto">
+              {PRESETS.map((pr, k) => [pr, k]).sort((x, y) => x[0][0] - y[0][0]).map(([[a, b], k]) => {
                 const g = gridOf(asset, k);
                 const mi = rankPresets.findIndex(x => x.pk === k);
                 return (
                   <button key={k} title={`${a} 日均線穿越 ${b} 日均線：金叉買進、死叉賣出${g ? `\n此區間（${assetLabel}）累計 ${pctTxt(g.total)}，已平倉 ${g.n} 次` : ''}`} onClick={() => setPi(k)}
-                    className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${pi === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-                    {mi >= 0 && mi < 3 ? MEDALS[mi] + ' ' : ''}{a}／{b}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
+                    className={`px-1 sm:px-3 py-1 rounded-md text-xs text-center border whitespace-nowrap transition-colors ${pi === k ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                    {mi >= 0 && mi < 3 ? MEDALS[mi] + ' ' : ''}{a}/{b}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
                   </button>
                 );
               })}
@@ -1186,7 +1189,7 @@
             {loadedCnt < ASSETS.length && <span className="text-xs text-yellow-500">載入中 {loadedCnt}／{ASSETS.length}</span>}
           </div>
           {st ? (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-3">
               {tile('已平倉', `${st.count} 次`,
                 <><span className="text-red-400">獲利 {st.wins}</span>{' · '}<span className="text-green-400">虧損 {st.losses}</span></>)}
               {tile('勝率', `${st.winRate.toFixed(0)}%`,
@@ -1195,8 +1198,8 @@
               {tile('平均每筆',
                 <span className="text-sm"><span className={rcl(st.avgWin)}>{sgp(st.avgWin)}</span>{' / '}<span className={rcl(st.avgLoss)}>{sgp(st.avgLoss)}</span></span>,
                 '平均獲利 / 平均虧損')}
-              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>,
-                <>買進持有 <span className={rcl(bh)}>{sgp(bh)}</span></>)}
+              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>, '各波段依序複利')}
+              {tile('買進持有', <span className={rcl(bh)}>{sgp(bh)}</span>, '區間首日買進抱到最新')}
               {tile('單筆極值',
                 <span className="text-sm"><span className={rcl(st.best)}>{sgp(st.best)}</span>{' / '}<span className={rcl(st.worst)}>{sgp(st.worst)}</span></span>,
                 '最佳 / 最差')}
@@ -2549,7 +2552,14 @@
             const raw = await loadWithDelta('./data/taiex.json',
               start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || getPastDateString(5))
                 .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, high: d.max, low: d.min, volume: d.Trading_Volume }))));
-            const base = raw.map(d => ({ date: d.date, close: d.close, high: d.high ?? d.close, low: d.low ?? d.close }));
+            // taiex.json 只有近 5 年，前段以 data/assets/TAIEX.json（2008 起，rows: [date, o, h, l, c]）補齊，供 10 年區間使用
+            let older = [];
+            try {
+              const ar = await fetch('./data/assets/TAIEX.json').then(x => x.ok ? x.json() : null);
+              const first = raw.length ? raw[0].date : '9999';
+              if (ar && ar.rows) older = ar.rows.filter(r => r[0] < first).map(r => ({ date: r[0], close: r[4], high: r[2], low: r[3] }));
+            } catch (_) {}
+            const base = [...older, ...raw.map(d => ({ date: d.date, close: d.close, high: d.high ?? d.close, low: d.low ?? d.close }))];
             if (base.length < 150) throw new Error('加權指數資料不足 150 日（慢線 130 日需暖機）。');
 
             // 兩種買賣策略（皆以收盤價進出；持有時不重複買、空手時不賣）：
@@ -2682,7 +2692,7 @@
             const last = rows[rows.length - 1];
             setModuleData(prev => ({...prev, M13: {
               status: 'info',
-              summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（${last.date}）。以持股比重的短均線（30／20／60 日）由下穿越長均線（90／60／180 日）為金叉買進、由上穿越為死叉賣出，可切換均線參數與買進標的（加權指數、ETF、個股、正 2），圖上標示金叉死叉、買賣點與波段報酬，並與買進持有對照。回測僅供參考，不計入評分。`,
+              summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（${last.date}）。以持股比重的短均線（20／30／60 日）由下穿越長均線（60／90／180 日）為金叉買進、由上穿越為死叉賣出，可切換均線參數與買進標的（加權指數、ETF、個股、正 2），圖上標示金叉死叉、買賣點與波段報酬，並與買進持有對照。回測僅供參考，不計入評分。`,
               chartTitle: '標的 K 線＋買賣標記（上）／外資持股比重與均線（下）· 1／2／3／4／5／10／15 年',
               renderBlock: (ex, head) => <ForeignTimingChart rows={rows} expanded={ex} head={head} />,
             }}));
