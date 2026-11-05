@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.39';
+    const APP_VERSION = 'v 20261105.40';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -1196,11 +1196,11 @@
               {tile('勝率', `${st.winRate.toFixed(0)}%`,
                 st.avgWin != null && st.avgLoss != null && st.avgLoss < 0
                   ? `盈虧比 ${(st.avgWin / Math.abs(st.avgLoss)).toFixed(2)}` : '盈虧比 —')}
+              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>, '各波段依序複利', bh != null && st.total > bh)}
+              {tile('買進持有', <span className={rcl(bh)}>{sgp(bh)}</span>, '區間首日買進抱到最新', bh != null && bh > st.total)}
               {tile('平均每筆',
                 <span className="text-sm"><span className={rcl(st.avgWin)}>{sgp(st.avgWin)}</span>{' / '}<span className={rcl(st.avgLoss)}>{sgp(st.avgLoss)}</span></span>,
                 '平均獲利 / 平均虧損')}
-              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>, '各波段依序複利', bh != null && st.total > bh)}
-              {tile('買進持有', <span className={rcl(bh)}>{sgp(bh)}</span>, '區間首日買進抱到最新', bh != null && bh > st.total)}
               {tile('單筆極值',
                 <span className="text-sm"><span className={rcl(st.best)}>{sgp(st.best)}</span>{' / '}<span className={rcl(st.worst)}>{sgp(st.worst)}</span></span>,
                 '最佳 / 最差')}
