@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.32';
+    const APP_VERSION = 'v 20261105.33';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -593,6 +593,11 @@
       const fr = [0, 0.25, 0.5, 0.75, 1];
       const RANGES = [{ label: '半年', v: 120 }, { label: '1 年', v: 250 }, { label: '3 年', v: 750 }, { label: '全部', v: td.length }];
       const tickIdx = Array.from({ length: 6 }, (_, k) => Math.round(k * (n - 1) / 5));
+      const TOGGLES = [
+        { label: 'EMA200 濾網', on: filter, set: setFilter, desc: '收盤在 EMA200 之上才買' },
+        { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價跌 5% 出場' },
+        { label: '提早進場', on: early, set: setEarly, desc: '收盤首次跌破下軌就買' },
+      ];
 
       return (
         <div className="flex flex-col">
@@ -605,19 +610,23 @@
                 </button>
               ))}
             </div>
-            <button onClick={() => setFilter(f => !f)}
-              className={`px-3 py-1 rounded-md text-xs border transition-colors ${filter ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-              EMA200 濾網：{filter ? '開（收盤在 EMA200 之上才買）' : '關'}
-            </button>
-            <button onClick={() => setStop(s => !s)}
-              className={`px-3 py-1 rounded-md text-xs border transition-colors ${stop ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-              停損 5%：{stop ? '開（收盤較買進價跌 5% 出場）' : '關'}
-            </button>
-            <button onClick={() => setEarly(e => !e)}
-              className={`px-3 py-1 rounded-md text-xs border transition-colors ${early ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-              提早進場：{early ? '開（收盤首次跌破下軌就買）' : '關'}
-            </button>
+            {TOGGLES.map(t => (
+              <button key={t.label} onClick={() => t.set(v => !v)} aria-pressed={t.on} title={`${t.label}：${t.on ? '開' : '關'}`}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs border transition-colors ${t.on ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                <span className="inline-block rounded-full" style={{ width: 7, height: 7, border: '1.5px solid currentColor', background: t.on ? 'currentColor' : 'transparent' }} />
+                {t.label}
+              </button>
+            ))}
           </div>
+          {/* 開關說明固定顯示三項，只以顏色區分開／關，切換時版面不跳動 */}
+          <p className="-mt-1 mb-3 text-xs leading-relaxed">
+            {TOGGLES.map((t, k) => (
+              <span key={t.label}>
+                {k > 0 && <span className="text-gray-600">　·　</span>}
+                <span className={t.on ? 'text-green-300' : 'text-gray-500'}>{t.label}：{t.desc}</span>
+              </span>
+            ))}
+          </p>
           {expanded && (<div className="order-last">
           {head}
           <div className="flex">
