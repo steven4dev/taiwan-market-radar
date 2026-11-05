@@ -84,6 +84,9 @@
     // ==========================================
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
+    // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
+    const APP_VERSION = 'v 20261105.16';
+
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
       M2: { weight: 0.16, title: '權值股健康度', icon: 'Activity' },
@@ -2441,6 +2444,7 @@
                 <h1 className="text-3xl font-bold flex items-center gap-3">
                   <Icons.Activity className="text-green-500" size={32} />
                   台股多空雷達
+                  <span className="text-xs font-normal text-gray-500 self-end mb-1" title="版本編號：日期.當日第幾次發佈">{APP_VERSION}</span>
                 </h1>
                 <p className="text-gray-400 mt-2 text-sm flex items-center gap-2">
                   <span>基於 FinMind 與 Yahoo 歷史資料計算</span>
