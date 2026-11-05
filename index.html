@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.33';
+    const APP_VERSION = 'v 20261105.34';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -388,7 +388,7 @@
           {base}{info[strat]}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-gray-500">買賣策略</span>
-            <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
+            <div className="inline-flex flex-wrap max-w-full rounded-2xl bg-gray-900 border border-gray-700 p-0.5 text-xs">
               {OPTS.map(([k, label, tip]) => (
                 <button key={k} title={tip} onClick={() => setStrat(k)}
                   className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${strat === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
@@ -591,8 +591,8 @@
       const avgL = losses.length ? losses.reduce((s, t) => s + t.ret, 0) / losses.length * 100 : 0;
       const sg = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
       const fr = [0, 0.25, 0.5, 0.75, 1];
-      const RANGES = [{ label: '半年', v: 120 }, { label: '1 年', v: 250 }, { label: '3 年', v: 750 }, { label: '全部', v: td.length }];
-      const tickIdx = Array.from({ length: 6 }, (_, k) => Math.round(k * (n - 1) / 5));
+      const RANGES = [{ label: '半年', v: 120 }, { label: '1 年', v: 250 }, { label: '2 年', v: 500 }, { label: '3 年', v: 750 }, { label: '5 年', v: 1250 }, { label: '10 年', v: 2500 }];
+      const tickIdx = Array.from({ length: 5 }, (_, k) => Math.round(k * (n - 1) / 4));   // 手機只顯示頭、中、尾
       const TOGGLES = [
         { label: 'EMA200 濾網', on: filter, set: setFilter, desc: '收盤在 EMA200 之上才買' },
         { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價跌 5% 出場' },
@@ -670,7 +670,7 @@
           </div>
           <div className="relative text-xs text-gray-500 select-none" style={{ height: 18, marginLeft: '3.4rem' }}>
             {tickIdx.map((ti, k) => (
-              <span key={k} className="absolute whitespace-nowrap" style={{ left: `${ti / (n - 1) * 100}%`, transform: 'translateX(-50%)' }}>
+              <span key={k} className={`absolute whitespace-nowrap ${k % 2 ? 'hidden sm:inline' : ''}`} style={{ left: `${ti / (n - 1) * 100}%`, transform: k === 0 ? 'none' : k === tickIdx.length - 1 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
                 {view[ti].date.slice(0, 7)}
               </span>
             ))}
@@ -842,7 +842,7 @@
           </div>
           <div className="relative text-xs text-gray-500 select-none" style={{ height: 18, marginLeft: '3.2rem', marginRight: '3.8rem' }}>
             {tickTs.map((t, k) => (
-              <span key={k} className="absolute whitespace-nowrap" style={{ left: `${(k / 6) * 100}%`, transform: 'translateX(-50%)' }}>
+              <span key={k} className={`absolute whitespace-nowrap ${k % 2 ? 'hidden sm:inline' : ''}`} style={{ left: `${(k / 6) * 100}%`, transform: 'translateX(-50%)' }}>
                 {new Date(t).toISOString().slice(0, 7)}
               </span>
             ))}
@@ -1154,7 +1154,7 @@
           </div>
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <span className="text-xs text-gray-500">均線參數</span>
-            <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
+            <div className="inline-flex flex-wrap max-w-full rounded-2xl bg-gray-900 border border-gray-700 p-0.5 text-xs">
               {PRESETS.map(([a, b], k) => {
                 const g = gridOf(asset, k);
                 const mi = rankPresets.findIndex(x => x.pk === k);
@@ -1211,7 +1211,7 @@
                 ? <><span className="text-red-400 font-bold">{beatCnt} 組</span>勝過買進持有</>
                 : <span className="text-yellow-400 font-bold">沒有任何一組勝過買進持有</span>}
               {rankTotal.length > 0 && <>；累計報酬 {rankTotal.slice(0, 3).map((g, k) => (
-                <span key={k} className="whitespace-nowrap">{k ? '　' : ''}{MEDALS[k]} <span className="text-white font-bold">{g.short}＋{g.S}／{g.L}</span>（<span className={g.total >= 0 ? 'text-red-400' : 'text-green-400'}>{pctTxt(g.total)}</span>）</span>
+                <span key={k}>{k ? '　' : ''}<span className="whitespace-nowrap">{MEDALS[k]} <span className="text-white font-bold">{g.short}＋{g.S}／{g.L}</span>（<span className={g.total >= 0 ? 'text-red-400' : 'text-green-400'}>{pctTxt(g.total)}</span>）</span></span>
               ))}</>}
               {bestDD && <>；回撤最小：<span className="text-white font-bold">{bestDD.short}＋{bestDD.S}／{bestDD.L}</span>（{bestDD.dd.toFixed(0)}%）</>}。
               <button onClick={() => setShowTable(v => !v)} className="ml-2 text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline">
@@ -1239,7 +1239,7 @@
               <div className="mb-3 bg-gray-900/40 border border-gray-700 rounded-lg p-3">
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   <span className="text-xs text-gray-500">排序</span>
-                  <div className="inline-flex rounded-full bg-gray-900 border border-gray-700 p-0.5 text-xs">
+                  <div className="inline-flex flex-wrap max-w-full rounded-2xl bg-gray-900 border border-gray-700 p-0.5 text-xs">
                     {SORTS.map(([k, l]) => (
                       <button key={k} onClick={() => setSortKey(k)}
                         className={`px-3 py-1 rounded-full whitespace-nowrap transition-colors ${sortKey === k ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>{l}</button>
@@ -1425,7 +1425,7 @@
           </div>
           <div className="relative text-xs text-gray-500 select-none" style={{ height: 18, marginLeft: '3.8rem' }}>
             {tickTs.map((t, k) => (
-              <span key={k} className="absolute whitespace-nowrap" style={{ left: `${(k / 6) * 100}%`, transform: 'translateX(-50%)' }}>
+              <span key={k} className={`absolute whitespace-nowrap ${k % 2 ? 'hidden sm:inline' : ''}`} style={{ left: `${(k / 6) * 100}%`, transform: k === 0 ? 'none' : k === tickTs.length - 1 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
                 {new Date(t).toISOString().slice(0, 7)}
               </span>
             ))}
@@ -1446,6 +1446,7 @@
     const AlignedChartPanel = ({ moduleData }) => {
       const { useMemo, useState, useRef, useCallback } = React;
       const [hovIdx, setHovIdx] = useState(null);
+      const [open, setOpen] = useState(false);   // 預設收折
       const chartRef = useRef(null);
 
       const allDates = useMemo(() => {
@@ -1515,10 +1516,16 @@
 
       return (
         <section className="mb-8 bg-gray-800 rounded-2xl p-5 border border-gray-700 shadow-xl">
-          <div className="flex items-center justify-between mb-1">
-            <h3 className="text-lg font-bold text-white">📐 多模組對齊</h3>
+          <div className="flex items-center justify-between gap-3 cursor-pointer" onClick={() => setOpen(o => !o)}>
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold text-white">📐 多模組對齊</h3>
+              <p className="text-sm text-gray-400 mt-1">近 {n} 個交易日 · 滑動查看各模組數值</p>
+            </div>
+            <button className="text-gray-400 hover:text-white transition-colors flex-shrink-0" aria-expanded={open}>
+              {open ? <Icons.ChevronUp size={24} /> : <Icons.ChevronDown size={24} />}
+            </button>
           </div>
-          <p className="text-sm text-gray-400 mb-3">近 {n} 個交易日 · 滑動查看各模組數值</p>
+          {open && (<div className="mt-3">
 
           {/* 標籤欄 + 圖表區 */}
           <div className="flex gap-0">
@@ -1736,7 +1743,7 @@
               title="往後一天"
             >▶</button>
           </div>
-
+          </div>)}
         </section>
       );
     };
@@ -2006,12 +2013,12 @@
       return (
         <div className={`bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-lg flex flex-col h-full ${config.wide || (config.wideWhenExpanded && isExpanded) ? 'md:col-span-2 lg:col-span-3' : ''}`}>
           <div className="flex justify-between items-center cursor-pointer" onClick={onToggle}>
-            <div className="flex items-center gap-3 w-full pr-4">
+            <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
               <div className="p-2 bg-gray-700 rounded-lg flex-shrink-0">
                 <IconComp size={20} className="text-gray-300" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-lg font-bold text-white truncate">{id} {config.title}</h3>
+                <h3 className="text-lg font-bold text-white leading-snug break-words">{id} {config.title}</h3>
                 {loading ? (
                   <span className="text-sm text-gray-400 block mt-1">資料載入中...</span>
                 ) : error ? (
@@ -2687,7 +2694,14 @@
             const raw = await loadWithDelta('./data/taiex.json',
               start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || getPastDateString(5))
                 .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, high: d.max, low: d.min, volume: d.Trading_Volume }))));
-            const base = raw.map(d => ({ date: d.date, close: d.close }));
+            // taiex.json 只有近 5 年，前段以 data/assets/TAIEX.json（2008 起，rows: [date, o, h, l, c]）補齊，供 10 年區間使用
+            let older = [];
+            try {
+              const ar = await fetch('./data/assets/TAIEX.json').then(x => x.ok ? x.json() : null);
+              const first = raw.length ? raw[0].date : '9999';
+              if (ar && ar.rows) older = ar.rows.filter(r => r[0] < first).map(r => ({ date: r[0], close: r[4] }));
+            } catch (_) {}
+            const base = [...older, ...raw.map(d => ({ date: d.date, close: d.close }))];
             if (base.length < 260) throw new Error('加權指數資料不足 260 日（EMA200 需暖機）。');
 
             let td = calculateEMA(base, 50, 'close', 'ema50');
