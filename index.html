@@ -513,7 +513,8 @@
       );
     };
 
-    // M12 圖表：外資持股比重 vs 加權指數（長期，雙軸各自自動縮放；X 軸依日期比例排列）
+    // M12 圖表：上方為所選標的的 K 線（還原價）＋波段連線與買賣標記，下方為外資持股比重與 30／90 日均線＋金叉死叉。
+    // 兩個副圖共用同一條時間軸（依日期比例排列）。
     const ForeignLongChart = ({ rows }) => {
       const { useMemo, useRef, useCallback } = React;
       const [years, setYears] = useState(5);
@@ -521,19 +522,20 @@
       const ASSETS = [['TAIEX', '加權指數'], ['0050', '0050 元大台灣50'], ['006208', '006208 富邦台50'], ['0056', '0056 元大高股息'],
         ['2330', '2330 台積電'], ['2317', '2317 鴻海'], ['2454', '2454 聯發科'], ['00631L', '00631L 台灣50正2'], ['00685L', '00685L 加權正2']];
       const [asset, setAsset] = useState('TAIEX');
-      const [store, setStore] = useState({});            // code → {rows:[[date, 還原收盤]]} | 'loading' | 'error'
+      const [store, setStore] = useState({});            // code → {rows:[[date,o,h,l,c]]} | 'loading' | 'error'
       useEffect(() => {
-        if (asset === 'TAIEX' || store[asset]) return;
+        if (store[asset]) return;
         setStore(m => ({ ...m, [asset]: 'loading' }));
         fetch(`./data/assets/${asset}.json`).then(x => { if (!x.ok) throw new Error(x.status); return x.json(); })
           .then(j => setStore(m => ({ ...m, [asset]: j })))
           .catch(() => setStore(m => ({ ...m, [asset]: 'error' })));
       }, [asset]);
       const assetLabel = ASSETS.find(a => a[0] === asset)[1];
-      const ast = asset === 'TAIEX' ? null : store[asset];
-      const assetStart = ast && ast.rows ? ast.rows[0][0] : null;
+      const ast = store[asset];
+      const arows = ast && ast.rows ? ast.rows : null;
+      const assetStart = arows ? arows[0][0] : null;
       const boxRef = useRef(null);
-      const DAILY_FROM = '2021-11-01';          // 此日期之前的資料為每週一筆
+      const DAILY_FROM = '2021-11-01';          // 此日期之前的持股資料為每週一筆
 
       const cutoff = useMemo(() => {
         const d = new Date(rows[rows.length - 1].date);
@@ -555,18 +557,15 @@
           });
         };
         const ms = ma(MA_S), ml = ma(MA_L);
-        let px = null;
-        if (asset !== 'TAIEX') {
-          const ar = ast && ast.rows ? ast.rows : [];
-          const at = ar.map(x => Date.parse(x[0]));
-          px = t.map(ti => {
-            let lo = 0, hi = at.length - 1, k = -1;
-            while (lo <= hi) { const mid = (lo + hi) >> 1; if (at[mid] <= ti) { k = mid; lo = mid + 1; } else hi = mid - 1; }
-            return k >= 0 && ti - at[k] <= 7 * DAY ? ar[k][1] : null;
-          });
-        }
-        return rows.map((d, i) => ({ ...d, ms: ms[i], ml: ml[i], price: px ? px[i] : d.index }));
-      }, [rows, MA_S, MA_L, asset, ast]);
+        // 標的收盤（還原價）：無當日價時沿用 7 日內最近一筆
+        const at = arows ? arows.map(x => Date.parse(x[0])) : [];
+        const px = t.map(ti => {
+          let lo = 0, hi = at.length - 1, k = -1;
+          while (lo <= hi) { const mid = (lo + hi) >> 1; if (at[mid] <= ti) { k = mid; lo = mid + 1; } else hi = mid - 1; }
+          return k >= 0 && ti - at[k] <= 7 * DAY ? arows[k][4] : null;
+        });
+        return rows.map((d, i) => ({ ...d, ms: ms[i], ml: ml[i], price: px[i] }));
+      }, [rows, MA_S, MA_L, arows]);
       const trades = useMemo(() => {
         const t = withMa.map(d => Date.parse(d.date));
         const warm = t[0] + MA_L * DAY;
@@ -589,6 +588,30 @@
       const n = view.length;
       const ts = useMemo(() => view.map(d => Date.parse(d.date)), [view]);
 
+      // K 棒：依根數自動選日／週／月 K（日 K ≤320 根；週 K ≤600 根；其餘月 K）
+      const { bars, mode } = useMemo(() => {
+        if (!arows || n < 2) return { bars: [], mode: 'd' };
+        const d0 = view[0].date, d1 = view[n - 1].date;
+        const sub = arows.filter(x => x[0] >= d0 && x[0] <= d1);
+        const mode = sub.length <= 320 ? 'd' : sub.length / 5 <= 600 ? 'w' : 'm';
+        const keyOf = ds => {
+          if (mode === 'd') return ds;
+          if (mode === 'm') return ds.slice(0, 7);
+          const dt = new Date(ds);
+          dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
+          return dt.toISOString().slice(0, 10);
+        };
+        const out = [];
+        let cur = null, ck = null;
+        for (const x of sub) {
+          const k = keyOf(x[0]);
+          const t = Date.parse(x[0]);
+          if (k !== ck) { cur = { t0: t, t1: t, d0: x[0], d1: x[0], o: x[1], h: x[2], l: x[3], c: x[4] }; out.push(cur); ck = k; }
+          else { cur.t1 = t; cur.d1 = x[0]; cur.h = Math.max(cur.h, x[2]); cur.l = Math.min(cur.l, x[3]); cur.c = x[4]; }
+        }
+        return { bars: out, mode };
+      }, [arows, view, n]);
+
       const onMove = useCallback(e => {
         if (!boxRef.current || ts.length < 2) return;
         const rect = boxRef.current.getBoundingClientRect();
@@ -599,35 +622,38 @@
         setHov(Math.abs(ts[lo] - target) <= Math.abs(ts[hi] - target) ? lo : hi);
       }, [ts]);
 
-      const RANGES = [{ label: '1 年', y: 1 }, { label: '3 年', y: 3 }, { label: '5 年', y: 5 }, { label: '10 年', y: 10 }, { label: '15 年', y: 15 }];
+      const RANGES = [1, 2, 3, 4, 5, 10, 15].map(y => ({ label: `${y} 年`, y }));
       if (n < 2) return <p className="text-gray-500 text-sm text-center py-6">資料不足。</p>;
 
-      const W = 1000, H = 300;
+      const W = 1000, HA = 270, HB = 120, GAP = 16;
       const span = ts[n - 1] - ts[0];
       const fx = i => (ts[i] - ts[0]) / span;
-      const scale = vals => {
+      const fxT = t => (t - ts[0]) / span;
+      const scale = (vals, pad = 0.06) => {
         const mn = Math.min(...vals), mx = Math.max(...vals);
-        const pd = (mx - mn) * 0.06 || 1;
+        const pd = (mx - mn) * pad || 1;
         return { lo: mn - pd, hi: mx + pd };
       };
       const rs = scale(view.map(d => d.ratio));
-      const idxVals = view.map(d => d.price).filter(v => v != null);
-      const is = idxVals.length ? scale(idxVals) : null;
-      const mk = (key, sc) => {
+      const ps = bars.length ? scale([...bars.map(b => b.h), ...bars.map(b => b.l)], 0.05) : null;
+      const pctP = v => (1 - (v - ps.lo) / (ps.hi - ps.lo)) * 100;       // 價格 → K 線副圖由上算起的百分比
+      const pctR = v => (1 - (v - rs.lo) / (rs.hi - rs.lo)) * 100;
+      const mk = key => {
         let path = '', started = false;
         view.forEach((d, i) => {
           if (d[key] == null) return;
-          const y = H - ((d[key] - sc.lo) / (sc.hi - sc.lo)) * H;
+          const y = HB * pctR(d[key]) / 100;
           path += `${started ? 'L' : 'M'} ${(fx(i) * W).toFixed(1)} ${y.toFixed(1)} `;
           started = true;
         });
         return path;
       };
       const fr = [0, 0.25, 0.5, 0.75, 1];
+      const frB = [0, 0.5, 1];
       const last = view[n - 1];
       const hiR = view.reduce((m, d) => (d.ratio > m.ratio ? d : m), view[0]);
       const loR = view.reduce((m, d) => (d.ratio < m.ratio ? d : m), view[0]);
-      // 金叉／死叉：30 日均線自下穿越 90 日均線＝金叉；自上穿越＝死叉（資料起點後 90 日內均線未成形，不計）
+      // 金叉／死叉：短均線自下穿越長均線＝金叉；自上穿越＝死叉（資料起點後 MA_L 日內均線未成形，不計）
       const warmTs = Date.parse(rows[0].date) + MA_L * DAY;
       const crosses = [];
       for (let i = 1; i < n; i++) {
@@ -663,12 +689,16 @@
           <p className="text-[11px] text-gray-400">{sub}</p>
         </div>
       );
-      const yI = v => (1 - (v - is.lo) / (is.hi - is.lo)) * 100;
       const nGold = crosses.filter(c => c.gold).length;
       const showLbl = crosses.length <= 30;
       const tickTs = Array.from({ length: 7 }, (_, k) => ts[0] + (span * k) / 6);
       const hd = hov != null ? view[hov] : null;
       const tipLeft = hov != null && fx(hov) > 0.6;
+      const hb = hd && bars.length ? bars.reduce((m, b) => (Math.abs((b.t0 + b.t1) / 2 - ts[hov]) < Math.abs((m.t0 + m.t1) / 2 - ts[hov]) ? b : m), bars[0]) : null;
+      const nom = mode === 'd' ? DAY : mode === 'w' ? 7 * DAY : 30 * DAY;
+      const bw = Math.max(0.9, nom / span * W * 0.7);
+      const modeLbl = mode === 'd' ? '日' : mode === 'w' ? '週' : '月';
+      const UP = '#ef4444', DN = '#22c55e';
 
       return (
         <>
@@ -676,7 +706,7 @@
             <p className="text-xs text-gray-400">
               最新 <span className="text-blue-400 font-bold">{last.ratio.toFixed(2)}%</span>（{last.date}）
               {' · '}區間高 {hiR.ratio.toFixed(2)}%（{hiR.date}）{' · '}區間低 {loR.ratio.toFixed(2)}%（{loR.date}）
-              {view[0].date < DAILY_FROM && <span className="text-gray-500">{' · '}{DAILY_FROM.slice(0, 7)} 之前為每週一筆</span>}
+              {view[0].date < DAILY_FROM && <span className="text-gray-500">{' · '}{DAILY_FROM.slice(0, 7)} 之前持股比重為每週一筆</span>}
               {' · '}<span className="text-red-400">金叉 {nGold}</span> / <span className="text-green-400">死叉 {crosses.length - nGold}</span>
               <span className="text-gray-500">（{MA_S} 日均線穿越 {MA_L} 日均線）</span>
               {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {years} 年</span>}
@@ -711,90 +741,127 @@
             {assetStart && assetStart > view[0].date && <span className="text-xs text-yellow-500">標的資料自 {assetStart} 起</span>}
           </div>
           <div className="flex">
-            <div className="relative flex-shrink-0 text-xs text-blue-400 select-none" style={{ width: '3.2rem', height: H }}>
-              {fr.map(f => (
-                <span key={f} className="absolute right-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
-                  {(rs.hi - f * (rs.hi - rs.lo)).toFixed(1)}%
-                </span>
-              ))}
-            </div>
-            <div ref={boxRef} className="flex-1 relative cursor-crosshair" style={{ height: H }}
-              onMouseMove={onMove} onMouseLeave={() => setHov(null)}>
-              <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full block overflow-visible">
-                {fr.map(f => (
-                  <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+            {/* 左側座標軸 */}
+            <div className="flex-shrink-0 select-none" style={{ width: '3.8rem' }}>
+              <div className="relative text-xs text-gray-300" style={{ height: HA }}>
+                {ps && fr.map(f => (
+                  <span key={f} className="absolute right-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
+                    {fmtP(ps.hi - f * (ps.hi - ps.lo))}
+                  </span>
                 ))}
-                {is && <path d={mk('price', is)} fill="none" stroke="#f87171" strokeWidth="1.3" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />}
-                {is && vt.map((x, k) => {
-                  const col = x.ret >= 0 ? '#ef4444' : '#22c55e';
-                  const mag = Math.abs(x.ret);
-                  const w = mag >= 15 ? 3.6 : mag >= 5 ? 2.8 : 2;
-                  const y0 = H * yI(view[x.a].price) / 100, y1 = H * yI(view[x.b].price) / 100;
+              </div>
+              <div className="relative text-xs text-blue-400" style={{ height: HB, marginTop: GAP }}>
+                {frB.map(f => (
+                  <span key={f} className="absolute right-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
+                    {(rs.hi - f * (rs.hi - rs.lo)).toFixed(1)}%
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div ref={boxRef} className="flex-1 relative cursor-crosshair min-w-0" onMouseMove={onMove} onMouseLeave={() => setHov(null)}>
+              {/* 上：K 線 */}
+              <div className="relative" style={{ height: HA }}>
+                <svg viewBox={`0 0 ${W} ${HA}`} preserveAspectRatio="none" className="w-full h-full block overflow-visible">
+                  {fr.map(f => (
+                    <line key={f} x1="0" x2={W} y1={f * HA} y2={f * HA} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+                  ))}
+                  {ps && bars.map((b, k) => {
+                    const up = b.c >= b.o, col = up ? UP : DN;
+                    const xc = fxT((b.t0 + b.t1) / 2) * W;
+                    const yO = HA * pctP(b.o) / 100, yC = HA * pctP(b.c) / 100;
+                    return (
+                      <g key={k}>
+                        <line x1={xc} x2={xc} y1={HA * pctP(b.h) / 100} y2={HA * pctP(b.l) / 100} stroke={col} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                        <rect x={xc - bw / 2} y={Math.min(yO, yC)} width={bw} height={Math.max(1, Math.abs(yC - yO))} fill={col} />
+                      </g>
+                    );
+                  })}
+                  {ps && vt.map((x, k) => {
+                    const col = x.ret >= 0 ? UP : DN;
+                    const mag = Math.abs(x.ret);
+                    const w = mag >= 15 ? 3.6 : mag >= 5 ? 2.8 : 2;
+                    return (
+                      <line key={'tr' + k} x1={fx(x.a) * W} y1={HA * pctP(view[x.a].price) / 100} x2={fx(x.b) * W} y2={HA * pctP(view[x.b].price) / 100}
+                        stroke={col} strokeWidth={w} strokeLinecap="round" strokeDasharray={x.open ? '0.1 6' : '8 4'} vectorEffect="non-scaling-stroke" />
+                    );
+                  })}
+                  {hov != null && <line x1={fx(hov) * W} x2={fx(hov) * W} y1="0" y2={HA} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
+                </svg>
+                <span className="absolute top-1 left-2 text-[11px] text-gray-500 pointer-events-none">{assetLabel}（{modeLbl}K・{adjNote}）</span>
+                {!arows && <p className="absolute inset-0 flex items-center justify-center text-xs text-gray-500 pointer-events-none">{ast === 'error' ? '標的資料載入失敗' : '載入中…'}</p>}
+                {ps && vt.map((x, k) => {
+                  const col = x.ret >= 0 ? UP : DN;
+                  const label = `${x.ret >= 0 ? '+' : ''}${x.ret.toFixed(1)}%`;
+                  const t0 = pctP(view[x.a].price), t1 = pctP(view[x.b].price);
+                  const wide = fx(x.b) - fx(x.a) > 0.05;
+                  const tri = (up, c, filled) => ({ width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
+                    ...(up ? { borderBottom: `10px solid ${c}` } : { borderTop: `10px solid ${c}` }), opacity: filled ? 1 : 0.9 });
                   return (
-                    <line key={'tr' + k} x1={fx(x.a) * W} y1={y0} x2={fx(x.b) * W} y2={y1} stroke={col} strokeWidth={w}
-                      strokeLinecap="round" strokeDasharray={x.open ? '0.1 6' : '8 4'} vectorEffect="non-scaling-stroke" />
+                    <React.Fragment key={'te' + k}>
+                      {!x.clipped && (
+                        <div className="absolute pointer-events-none" title={`▲ 買進 ${x.d0}　收 ${fmtP(x.p0)}`}
+                          style={{ left: `${fx(x.a) * 100}%`, top: `${t0}%`, transform: 'translate(-50%, 5px)', ...tri(true, UP, true) }} />
+                      )}
+                      <div className="absolute pointer-events-none" title={x.open ? `持有中（最新收 ${fmtP(x.p1)}）` : `▼ 賣出 ${x.d1}　收 ${fmtP(x.p1)}`}
+                        style={{ left: `${fx(x.b) * 100}%`, top: `${t1}%`, transform: 'translate(-50%, calc(-100% - 5px))', ...tri(false, x.open ? '#9ca3af' : DN, !x.open) }} />
+                      {vt.length <= 20 && wide && (
+                        <span className="absolute pointer-events-none text-[10px] font-bold rounded px-1 whitespace-nowrap"
+                          style={{ left: `${(fx(x.a) + fx(x.b)) * 50}%`, top: `${(t0 + t1) / 2}%`, transform: 'translate(-50%,-150%)',
+                            background: 'rgba(17,24,39,0.88)', border: `1px solid ${col}`, color: col }}>{label}</span>
+                      )}
+                    </React.Fragment>
                   );
                 })}
-                <path d={mk('ml', rs)} fill="none" stroke="#a78bfa" strokeWidth="1.2" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" opacity="0.9" />
-                <path d={mk('ms', rs)} fill="none" stroke="#facc15" strokeWidth="1.2" vectorEffect="non-scaling-stroke" opacity="0.9" />
-                <path d={mk('ratio', rs)} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-                {hov != null && <line x1={fx(hov) * W} x2={fx(hov) * W} y1="0" y2={H} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
-              </svg>
-              {is && vt.map((x, k) => {
-                const col = x.ret >= 0 ? '#ef4444' : '#22c55e';
-                const label = `${x.ret >= 0 ? '+' : ''}${x.ret.toFixed(1)}%`;
-                const t0 = yI(view[x.a].price), t1 = yI(view[x.b].price);
-                const wide = fx(x.b) - fx(x.a) > 0.05;
-                return (
-                  <React.Fragment key={'te' + k}>
-                    <div className="absolute pointer-events-none" title={`${x.d0} → ${x.open ? '最新' : x.d1}`}
-                      style={{ left: `${fx(x.b) * 100}%`, top: `${t1}%`, transform: 'translate(-50%,-50%)', width: 9, height: 9, borderRadius: '50%',
-                        background: x.open ? '#111827' : col, border: `2px solid ${col}` }} />
-                    {vt.length <= 20 && wide && (
-                      <span className="absolute pointer-events-none text-[10px] font-bold rounded px-1 whitespace-nowrap"
-                        style={{ left: `${(fx(x.a) + fx(x.b)) * 50}%`, top: `${(t0 + t1) / 2}%`, transform: 'translate(-50%,-150%)',
-                          background: 'rgba(17,24,39,0.88)', border: `1px solid ${col}`, color: col }}>{label}</span>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-              {crosses.map(c => {
-                const col = c.gold ? '#ef4444' : '#22c55e';
-                const v = view[c.i].ms;
-                const top = (1 - (v - rs.lo) / (rs.hi - rs.lo)) * 100;
-                return (
-                  <div key={c.i} className="absolute pointer-events-none" style={{ left: `${fx(c.i) * 100}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}>
-                    <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#111827', border: `2.5px solid ${col}` }} />
-                    {showLbl && (
-                      <span className="absolute left-1/2 text-[10px] font-bold text-white rounded px-1 whitespace-nowrap"
-                        style={{ background: col, transform: 'translateX(-50%)', ...(c.gold ? { top: 14 } : { bottom: 14 }) }}>
-                        {c.gold ? '金叉' : '死叉'}
-                      </span>
-                    )}
+                {hd && (
+                  <div className="absolute top-6 z-10 pointer-events-none bg-gray-900/90 border border-gray-600 rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-nowrap"
+                    style={tipLeft ? { right: `${100 - fx(hov) * 100 + 1}%` } : { left: `${fx(hov) * 100 + 1}%` }}>
+                    <div className="text-gray-300 font-bold">{hd.date}</div>
+                    {hb ? (
+                      <div className="text-gray-200">
+                        {mode === 'd' ? '' : `${hb.d0.slice(5)}～${hb.d1.slice(5)} `}
+                        開 {fmtP(hb.o)} 高 {fmtP(hb.h)} 低 {fmtP(hb.l)} 收 <span className={hb.c >= hb.o ? 'text-red-400' : 'text-green-400'}>{fmtP(hb.c)}</span>
+                      </div>
+                    ) : <div className="text-gray-500">{assetLabel}：此日無資料</div>}
+                    <div className="text-blue-400">外資持股占比 {hd.ratio.toFixed(2)}%</div>
+                    <div className="text-gray-300">不含台積電 {hd.exTsmc.toFixed(2)}%</div>
+                    <div className="text-yellow-400">{MA_S} 日均 {hd.ms.toFixed(2)}%</div>
+                    <div className="text-purple-400">{MA_L} 日均 {hd.ml.toFixed(2)}%</div>
                   </div>
-                );
-              })}
-              {hd && (
-                <div className="absolute top-2 z-10 pointer-events-none bg-gray-900/90 border border-gray-600 rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-nowrap"
-                  style={tipLeft ? { right: `${100 - fx(hov) * 100 + 1}%` } : { left: `${fx(hov) * 100 + 1}%` }}>
-                  <div className="text-gray-300 font-bold">{hd.date}</div>
-                  <div className="text-blue-400">外資持股占比 {hd.ratio.toFixed(2)}%</div>
-                  <div className="text-gray-300">不含台積電 {hd.exTsmc.toFixed(2)}%</div>
-                  <div className="text-yellow-400">{MA_S} 日均 {hd.ms.toFixed(2)}%</div>
-                  <div className="text-purple-400">{MA_L} 日均 {hd.ml.toFixed(2)}%</div>
-                  <div className="text-red-400">{assetLabel} {hd.price != null ? fmtP(hd.price) : '—'}</div>
-                </div>
-              )}
-            </div>
-            <div className="relative flex-shrink-0 text-xs text-red-400 select-none" style={{ width: '3.8rem', height: H }}>
-              {is && fr.map(f => (
-                <span key={f} className="absolute left-1" style={{ top: `${f * 100}%`, transform: 'translateY(-50%)' }}>
-                  {fmtP(is.hi - f * (is.hi - is.lo))}
+                )}
+              </div>
+              {/* 下：外資持股比重＋均線＋金叉死叉 */}
+              <div className="relative" style={{ height: HB, marginTop: GAP }}>
+                <svg viewBox={`0 0 ${W} ${HB}`} preserveAspectRatio="none" className="w-full h-full block overflow-visible">
+                  {frB.map(f => (
+                    <line key={f} x1="0" x2={W} y1={f * HB} y2={f * HB} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+                  ))}
+                  <path d={mk('ml')} fill="none" stroke="#a78bfa" strokeWidth="1.2" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" opacity="0.9" />
+                  <path d={mk('ms')} fill="none" stroke="#facc15" strokeWidth="1.2" vectorEffect="non-scaling-stroke" opacity="0.9" />
+                  <path d={mk('ratio')} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                  {hov != null && <line x1={fx(hov) * W} x2={fx(hov) * W} y1="0" y2={HB} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
+                </svg>
+                <span className="absolute top-1 left-2 text-[11px] pointer-events-none">
+                  <span className="text-blue-400">— 外資持股占比</span>{' '}<span className="text-yellow-400">— {MA_S} 日均</span>{' '}<span className="text-purple-400">- - {MA_L} 日均</span>
                 </span>
-              ))}
+                {crosses.map(c => {
+                  const col = c.gold ? UP : DN;
+                  const top = pctR(view[c.i].ms);
+                  return (
+                    <div key={c.i} className="absolute pointer-events-none" style={{ left: `${fx(c.i) * 100}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}>
+                      <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#111827', border: `2.5px solid ${col}` }} />
+                      {showLbl && (
+                        <span className="absolute left-1/2 text-[10px] font-bold text-white rounded px-1 whitespace-nowrap"
+                          style={{ background: col, transform: 'translateX(-50%)', ...(c.gold ? { top: 14 } : { bottom: 14 }) }}>
+                          {c.gold ? '金叉' : '死叉'}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-          <div className="relative text-xs text-gray-500 select-none" style={{ height: 18, marginLeft: '3.2rem', marginRight: '3.8rem' }}>
+          <div className="relative text-xs text-gray-500 select-none" style={{ height: 18, marginLeft: '3.8rem' }}>
             {tickTs.map((t, k) => (
               <span key={k} className="absolute whitespace-nowrap" style={{ left: `${(k / 6) * 100}%`, transform: 'translateX(-50%)' }}>
                 {new Date(t).toISOString().slice(0, 7)}
@@ -822,7 +889,7 @@
           )}
           <p className="text-[11px] text-gray-500">
             {openT ? <>目前持有中：{openT.d0} 進場，帳面 <span className={rcl(openT.ret)}>{sgp(openT.ret)}</span>（未平倉不計入統計）。</> : '目前空手。'}
-            {' '}統計為「賣出日落在此區間」的已平倉波段，以{assetLabel}{adjNote}計，未含手續費與稅；持股比重為盤後公布，實際進出約晚一個交易日。2021-11 之前為週資料，進出價有數日誤差。
+            {' '}統計為「賣出日落在此區間」的已平倉波段，以{assetLabel}{adjNote}計，未含手續費與稅；持股比重為盤後公布，實際進出約晚一個交易日。2021-11 之前持股比重為週資料，進出價有數日誤差。K 線依區間自動合併為日／週／月 K（紅漲綠跌）。
           </p>
         </>
       );
