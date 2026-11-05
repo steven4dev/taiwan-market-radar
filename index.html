@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.34';
+    const APP_VERSION = 'v 20261105.35';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -1054,7 +1054,7 @@
         setHov(Math.abs(ts[lo] - target) <= Math.abs(ts[hi] - target) ? lo : hi);
       }, [ts]);
 
-      const RANGES = [1, 2, 3, 4, 5, 10, 15].map(y => ({ label: `${y} 年`, y }));
+      const RANGES = [1, 2, 3, 5, 10, 15].map(y => ({ label: `${y} 年`, y }));
       if (n < 2) return <p className="text-gray-500 text-sm text-center py-6">資料不足。</p>;
 
       const W = 1000, HA = 270, HB = 120, GAP = 16;
@@ -2352,6 +2352,7 @@
             const fmt = raw.map(d => ({ date:d.date, close:d.close, volume:(d.volume||d.Trading_Volume||0)/1e8, open:d.open }));
             let td = calculateSMA(fmt, 60);
             td = calculateSMA(td, 120);
+            td = calculateSMA(td, 240);   // 年線
             td = calculateMACD(td);
 
             // 成交量：略過 volume=0（盤中/尚未回填/歷史缺漏）的列；十日均量只用 volume>0 的交易日
@@ -2380,6 +2381,7 @@
 
             const over60  = last.close > last.sma60;
             const over120 = last.close > last.sma120;
+            const over240 = last.sma240 != null ? last.close > last.sma240 : null;
             let m5Status = 'green';
             if (over60 && !over120) m5Status = 'yellow';
             if (!over60 && last.macd < 0) m5Status = 'red';
@@ -2392,12 +2394,12 @@
               status: m5Status,
               rally20d,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.macd ?? null })),
-              summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線。MACD 值為 ${last.macd.toFixed(1)}。`,
-              chartTitle: '加權指數走勢與季線（黃）/半年線（紫）（近 120 日）',
+              summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線${over240 == null ? '' : `，${over240?'站上':'跌破'}年線（${last.sma240.toFixed(0)}）`}。MACD 值為 ${last.macd.toFixed(1)}。`,
+              chartTitle: '加權指數走勢與季線（黃）/半年線（紫）/年線（藍）（近 120 日）',
               renderChart: () => (
                 <SvgLineChart
                   data={td.slice(-120)}
-                  lines={[{key:'close',color:'#ffffff',width:'2'},{key:'sma60',color:'#facc15',width:'1.5'},{key:'sma120',color:'#c084fc',width:'1.5'}]}
+                  lines={[{key:'close',color:'#ffffff',width:'2'},{key:'sma60',color:'#facc15',width:'1.5'},{key:'sma120',color:'#c084fc',width:'1.5'},{key:'sma240',color:'#38bdf8',width:'1.5'}]}
                 />
               ),
             }}));
