@@ -1836,41 +1836,30 @@
 
             const sg = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}`;
 
-            // 加權指數等比例縮放到持股比重區間，疊在同一張圖看背離
-            let taiexMap = {};
-            try {
-              const tr = await fetch('./data/taiex.json');
-              if (tr.ok) (await tr.json()).forEach(d => { taiexMap[d.date] = d.close; });
-            } catch(e) {}
-            const closes = series.map(d => taiexMap[d.date]).filter(v => v != null);
-            const cMin = Math.min(...closes), cMax = Math.max(...closes);
-            const chartData = series.map(d => ({
-              date: d.date,
-              ratio: d.ratio,
-              index: taiexMap[d.date] != null && cMax > cMin
-                ? rMin + (taiexMap[d.date] - cMin) / (cMax - cMin) * (rMax - rMin)
-                : null,
-            }));
-
             setModuleData(prev => ({...prev, M10: {
               status,
               alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.ratio })),
               summary: `外資持股占上市總市值 ${latest.ratio.toFixed(2)}%（不含台積電 ${latest.exTsmc.toFixed(2)}%）。近 20 日 ${sg(d20)}pp、近 5 日 ${sg(d5)}pp${d60 != null ? `、近 60 日 ${sg(d60)}pp` : ''}，位於近 ${n} 日區間的 ${pos}% 位置。持股 ≥50% 的個股 ${latest.over50} 檔。${status === 'green' ? '外資持股比重回升，籌碼面偏多。' : status === 'red' ? '外資持股比重明顯下降（近 20 日降逾 1pp），若指數同步在高檔屬背離，需提高警覺。' : '外資持股比重變動不大，方向未明。'}`,
-              chartTitle: `外資持股占上市總市值（近 ${n} 日，%）`,
-              legend: (<>
-                <span className="text-blue-400">— 持股比重</span>
-                <span className="text-red-400">- - 加權指數（等比例縮放）</span>
-              </>),
-              renderChart: () => (
-                <SvgLineChart
-                  data={chartData}
-                  lines={[
-                    { key: 'ratio', color: '#60a5fa', width: '2' },
-                    { key: 'index', color: '#f87171', width: '1.5', dash: '4 3' },
-                  ]}
-                  height={150}
-                />
-              ),
+              chartTitle: `評分指標（近 ${n} 日）· 完整走勢與加權指數對照見 M12`,
+              renderChart: () => {
+                const rc = v => (v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400');
+                const tile = (label, value, sub) => (
+                  <div key={label} className="bg-gray-900/60 border border-gray-700 rounded-lg px-3 py-2">
+                    <p className="text-[11px] text-gray-500">{label}</p>
+                    <p className="text-base font-bold text-white leading-snug">{value}</p>
+                    <p className="text-[11px] text-gray-400">{sub}</p>
+                  </div>
+                );
+                const dv = (v) => v == null ? '—' : <span className={rc(v)}>{sg(v)}pp</span>;
+                return (
+                  <div className="grid grid-cols-2 gap-2">
+                    {tile('持股比重', `${latest.ratio.toFixed(2)}%`, `不含台積電 ${latest.exTsmc.toFixed(2)}%`)}
+                    {tile('區間位置', `${pos}%`, `近 ${n} 日 ${rMin.toFixed(2)}–${rMax.toFixed(2)}%`)}
+                    {tile('近 5／20 日', <span className="text-sm">{dv(d5)}{' / '}{dv(d20)}</span>, '燈號依據')}
+                    {tile('近 60 日', dv(d60), `持股≥50% 個股 ${latest.over50} 檔`)}
+                  </div>
+                );
+              },
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M10:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M10:false})); }
