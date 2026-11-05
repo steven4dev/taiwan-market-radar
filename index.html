@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.26';
+    const APP_VERSION = 'v 20261105.27';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -101,6 +101,7 @@
       M11: { weight: 0.06, title: 'MACD+KD 短線時機', icon: 'Crosshair', wideWhenExpanded: true },
       M12: { weight: 0, title: '外資持股比重 vs 加權指數（長期）', icon: 'LineChart', wide: true },
       M13: { weight: 0, title: '外資持股擇時回測（可選標的）', icon: 'Crosshair', wide: true },
+      M14: { weight: 0, title: 'EMA200 趨勢', icon: 'TrendingUp', wideWhenExpanded: true },
     };
 
     const SCORE_LABELS = [
@@ -1910,17 +1911,17 @@
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [revData, setRevData] = useState(null);
-      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null, M10:null, M11:null, M12:null, M13:null });
+      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null, M10:null, M11:null, M12:null, M13:null, M14:null });
       const [moduleErrors, setModuleErrors] = useState({});
-      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true, M12:true, M13:true });
-      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false, M10:false, M11:false, M12:false, M13:false });
+      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true, M12:true, M13:true, M14:true });
+      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false, M10:false, M11:false, M12:false, M13:false, M14:false });
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
       const fetchAllData = async () => {
         setIsRefreshing(true);
         setModuleErrors({});
-        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true, M12:true, M13:true });
+        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true, M12:true, M13:true, M14:true });
 
         const startDate  = getPastDateString(8);
         const recentDate = getPastDateString(3);
@@ -2513,6 +2514,84 @@
           finally    { setModuleLoading(prev => ({...prev, M13:false})); }
         };
 
+        // M14 EMA200 趨勢：加權指數相對 EMA200／EMA50 的位置，輔以 MACD、RSI、布林通道（不計入評分）
+        const processM14 = async () => {
+          try {
+            const raw = await loadWithDelta('./data/taiex.json',
+              start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || getPastDateString(5))
+                .then(r => r.map(d => ({ date: d.date, close: d.close, open: d.open, high: d.max, low: d.min, volume: d.Trading_Volume }))));
+            const base = raw.map(d => ({ date: d.date, close: d.close }));
+            if (base.length < 260) throw new Error('加權指數資料不足 260 日（EMA200 需暖機）。');
+
+            let td = calculateEMA(base, 50, 'close', 'ema50');
+            td = calculateEMA(td, 200, 'close', 'ema200');
+            td = calculateMACD(td);
+            // RSI 14（Wilder 平滑）
+            let avgG = 0, avgL = 0;
+            td = td.map((d, i, a) => {
+              if (i === 0) return { ...d, rsi: null };
+              const ch = d.close - a[i - 1].close, g = Math.max(ch, 0), l = Math.max(-ch, 0);
+              if (i <= 14) { avgG += g / 14; avgL += l / 14; }
+              else { avgG = (avgG * 13 + g) / 14; avgL = (avgL * 13 + l) / 14; }
+              return { ...d, rsi: i < 14 ? null : (avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)) };
+            });
+            // 布林通道 20 日、2 倍標準差
+            td = td.map((d, i, a) => {
+              if (i < 19) return { ...d, bbU: null, bbL: null };
+              const w = a.slice(i - 19, i + 1).map(x => x.close);
+              const m = w.reduce((s, v) => s + v, 0) / 20;
+              const sd = Math.sqrt(w.reduce((s, v) => s + (v - m) ** 2, 0) / 20);
+              return { ...d, bbU: m + 2 * sd, bbL: m - 2 * sd };
+            });
+
+            const n = td.length, last = td[n - 1], prev20 = td[n - 21];
+            const above200 = last.close > last.ema200;
+            const above50  = last.close > last.ema50;
+            const slopeUp  = last.ema200 > prev20.ema200;
+            const dist200  = (last.close / last.ema200 - 1) * 100;
+            const status = above200 ? (above50 ? 'green' : 'yellow') : 'red';
+
+            // 最近一次收盤價穿越 EMA200
+            let crossIdx = -1;
+            for (let i = n - 1; i > 0; i--) {
+              if ((td[i].close > td[i].ema200) !== (td[i - 1].close > td[i - 1].ema200)) { crossIdx = i; break; }
+            }
+            const crossTxt = crossIdx >= 0
+              ? `最近一次${td[crossIdx].close > td[crossIdx].ema200 ? '站上' : '跌破'} EMA200 為 ${td[crossIdx].date}（${n - 1 - crossIdx} 個交易日前）。` : '';
+
+            const trendTxt = status === 'green' ? '長短期皆站上均線，多頭格局'
+              : status === 'yellow' ? '長期趨勢線之上、短期均線之下，多頭中的修正，EMA200 為關鍵支撐'
+              : '跌破 EMA200，長期趨勢轉弱，嚴守紀律';
+            const bbTxt = last.close < last.bbL ? '收盤在布林下軌之下（超跌區，留意反彈）。'
+                        : last.close > last.bbU ? '收盤在布林上軌之上（過熱區，留意回檔）。' : '';
+            const rsiTxt = last.rsi == null ? '' : `RSI14 ${last.rsi.toFixed(1)}${last.rsi < 30 ? '（超賣）' : last.rsi > 70 ? '（超買）' : ''}。`;
+
+            setModuleData(prev => ({...prev, M14: {
+              status,
+              alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.close - d.ema200 })),
+              summary: `${trendTxt}。收盤 ${last.close.toFixed(0)}，EMA200 ${last.ema200.toFixed(0)}（${dist200 >= 0 ? '+' : ''}${dist200.toFixed(1)}%，${slopeUp ? '向上' : '向下'}），EMA50 ${last.ema50.toFixed(0)}（EMA50 在 EMA200 ${last.ema50 > last.ema200 ? '上方' : '下方'}）。MACD 柱體${last.osc > 0 ? '為正' : '為負'}。${rsiTxt}${bbTxt}${crossTxt}此模組僅供趨勢參考，不計入評分。`,
+              chartTitle: '加權指數 vs EMA50 / EMA200（近 250 日）',
+              legend: (<>
+                <span className="text-gray-200 whitespace-nowrap">— 收盤</span>
+                <span className="text-red-400 whitespace-nowrap">— EMA50</span>
+                <span className="text-green-400 whitespace-nowrap">— EMA200</span>
+              </>),
+              renderChart: () => (
+                <SvgLineChart
+                  data={td.slice(-250)}
+                  lines={[
+                    { key: 'close',  color: '#e5e7eb', width: '1.5' },
+                    { key: 'ema50',  color: '#f87171', width: '1.5' },
+                    { key: 'ema200', color: '#22c55e', width: '2.5' },
+                  ]}
+                  height={180}
+                />
+              ),
+            }}));
+          } catch(e) { setModuleErrors(prev => ({...prev, M14:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M14:false})); }
+        };
+
         // M10 外資持股比重（外資持股市值 ÷ 上市總市值，TWSE 每日盤後公布）
         const processM10 = async () => {
           try {
@@ -2655,7 +2734,7 @@
           finally    { setModuleLoading(prev => ({...prev, M9:false})); }
         };
 
-        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processM10(), processM11(), processM12(), processM13(), processRevenue()]);
+        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processM10(), processM11(), processM12(), processM13(), processM14(), processRevenue()]);
 
         const now = new Date();
         setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
@@ -2688,7 +2767,7 @@
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
       const handleToggleAll = () => {
         const v = !isAllExpanded;
-        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v, M10:v, M11:v, M12:v, M13:v });
+        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v, M10:v, M11:v, M12:v, M13:v, M14:v });
       };
 
       const score = calculateScore();
