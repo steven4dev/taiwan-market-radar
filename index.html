@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.37';
+    const APP_VERSION = 'v 20261105.38';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -381,12 +381,12 @@
     const M11Summary = ({ base, info }) => {
       const [strat, setStrat] = useM11Strategy();
       const OPTS = [
-        ['conv', '新｜收斂第 3 根', '空手時綠柱連續收斂第 3 根買進；持有時紅柱連續收斂第 3 根賣出'],
-        ['cross', '舊｜正負轉換', '柱體由負轉正買進；由正轉負賣出'],
+        ['conv', '新｜收斂第 3 根', '空手時綠柱連續收斂第 3 根收盤買進；持有時紅柱連續收斂第 3 根收盤賣出（收斂＝同色柱比前一根短）'],
+        ['cross', '舊｜正負轉換', '柱體由負轉正收盤買進；由正轉負收盤賣出'],
       ];
       return (
         <>
-          {base}{info[strat]}
+          {base}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-gray-500">買賣策略</span>
             <div className="flex flex-wrap gap-1">
@@ -397,6 +397,12 @@
                 </button>
               ))}
             </div>
+          </div>
+          {/* 兩種策略說明固定顯示，只以顏色區分選中／未選，切換時版面不跳動 */}
+          <div className="mt-2 space-y-1 text-xs leading-relaxed">
+            {OPTS.map(([k, label, tip]) => (
+              <p key={k} className={`transition-colors ${strat === k ? 'text-blue-300' : 'text-gray-500'}`}>{label}：{tip}。{info[k]}</p>
+            ))}
           </div>
         </>
       );
@@ -472,12 +478,7 @@
       return (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div>
-              <p className="text-xs text-gray-300">策略規則：{strat === 'conv'
-                ? '空手時綠柱連續收斂第 3 根收盤買進；持有時紅柱連續收斂第 3 根收盤賣出（收斂＝同色柱比前一根短）'
-                : '柱體由負轉正收盤買進；由正轉負收盤賣出'}</p>
-              <p className="text-xs text-gray-500">統計＝區間內「賣出」的已平倉波段 · 收盤價計，未含手續費與證交稅</p>
-            </div>
+            <p className="text-xs text-gray-500">統計＝區間內「賣出」的已平倉波段（依上方所選策略）· 收盤價計，未含手續費與證交稅</p>
             <div className="flex flex-wrap gap-1">
               {RANGES.map(r => (
                 <button key={r.key} onClick={() => setRangeKey(r.key)}
