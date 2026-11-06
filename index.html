@@ -85,7 +85,7 @@
     const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261105.40';
+    const APP_VERSION = 'v 20261106.01';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -170,7 +170,7 @@
     // ==========================================
     // 2. SVG 圖表元件
     // ==========================================
-    const SvgLineChart = ({ data, lines, height = 150 }) => {
+    const SvgLineChart = ({ data, lines, height = 150, labels = [], fmt = v => v.toFixed(2) }) => {
       if (!data || data.length === 0) return null;
       let min = Infinity, max = -Infinity;
       data.forEach(d => lines.forEach(line => {
@@ -199,13 +199,24 @@
 
       return (
         <div className="relative w-full overflow-hidden text-xs" style={{ height }}>
-          <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+          <svg viewBox={`0 0 ${width} ${height}`} className="h-full overflow-visible" style={{ width: labels.length ? 'calc(100% - 92px)' : '100%' }} preserveAspectRatio="none">
             {lines.map((line, i) => (
-              <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" strokeDasharray={line.dash} />
+              <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" strokeDasharray={line.dash} vectorEffect={line.dash ? 'non-scaling-stroke' : undefined} />
             ))}
           </svg>
-          <div className="absolute top-0 left-0 text-gray-500 bg-gray-900/50 px-1 rounded">{max.toFixed(2)}</div>
-          <div className="absolute bottom-0 left-0 text-gray-500 bg-gray-900/50 px-1 rounded">{min.toFixed(2)}</div>
+          {(() => {
+            // 右側數值標籤：依 y 由上而下排序，彼此至少相隔 14px，並限制在圖框內
+            const pts = labels.filter(l => l.value != null)
+              .map(l => ({ ...l, y: height - ((l.value - min) / (max - min)) * height }))
+              .sort((a, b) => a.y - b.y);
+            for (let k = 0; k < pts.length; k++) pts[k].y = Math.max(pts[k].y, k ? pts[k - 1].y + 14 : 7);
+            for (let k = pts.length - 1; k >= 0; k--) pts[k].y = Math.min(pts[k].y, k < pts.length - 1 ? pts[k + 1].y - 14 : height - 7);
+            return pts.map(l => (
+              <div key={l.text} className="absolute right-0 px-1 rounded bg-gray-900/80 font-bold whitespace-nowrap" style={{ top: l.y, transform: 'translateY(-50%)', color: l.color, fontSize: 10 }}>{l.text}</div>
+            ));
+          })()}
+          <div className="absolute top-0 left-0 text-gray-500 bg-gray-900/50 px-1 rounded">{fmt(max)}</div>
+          <div className="absolute bottom-0 left-0 text-gray-500 bg-gray-900/50 px-1 rounded">{fmt(min)}</div>
         </div>
       );
     };
@@ -1945,24 +1956,27 @@
     // ==========================================
     // 4b. M1 可縮放圖表元件
     // ==========================================
-    const M1ZoomChart = ({ taiexData, keyLevel }) => {
+    const M1ZoomChart = ({ taiexData, levels }) => {
       const { useState } = React;
       const STEPS = [30, 60, 90, 120, 180, 250];
       const [stepIdx, setStepIdx] = useState(3); // 預設 120 天
       const days = STEPS[stepIdx];
       const withSMA = calculateSMA(taiexData.map(d => ({ date: d.date, close: d.close })), 60);
       const byDate = Object.fromEntries(withSMA.map(d => [d.date, d.sma60]));
-      const chartData = taiexData.slice(-days).map(d => ({ ...d, keyLevel, sma60: byDate[d.date] ?? null }));
+      const chartData = taiexData.slice(-days).map(d => ({ ...d, sma60: byDate[d.date] ?? null,
+        ...Object.fromEntries(levels.map(l => [l.key, l.value])) }));
       return (
         <div>
           <SvgLineChart
             data={chartData}
             lines={[
-              { key:'close',    color:'#ffffff', width:'2'   },
-              { key:'keyLevel', color:'#ef4444', width:'1.5' },
-              { key:'sma60',    color:'#facc15', width:'1.5' },
+              { key:'close', color:'#ffffff', width:'2' },
+              { key:'sma60', color:'#facc15', width:'1.5' },
+              ...levels.map(l => ({ key: l.key, color: l.color, width: '1.5', dash: l.dash })),
             ]}
-            height={100}
+            labels={levels.map(l => ({ value: l.value, color: l.color, text: `${l.name} ${Math.round(l.value).toLocaleString()}` }))}
+            fmt={v => Math.round(v).toLocaleString()}
+            height={150}
           />
           <div className="flex items-center justify-end gap-2 mt-2">
             <button
@@ -2049,6 +2063,11 @@
           {!loading && !error && data && (
             <div className="mt-4 text-gray-300 text-sm leading-relaxed flex-grow">
               {data.summary}
+              {data.plain && (
+                <div className="mt-3 rounded-lg bg-blue-950/30 border border-blue-900/60 px-3 py-2 text-sm text-gray-200 leading-relaxed">
+                  <span className="text-blue-300 font-bold">💬 白話：</span>{data.plain}
+                </div>
+              )}
               {crossRef && (
                 <p className={`mt-2 text-xs ${crossRef.color} border-t border-gray-700 pt-2`}>{crossRef.text}</p>
               )}
@@ -2121,25 +2140,34 @@
             const SCAN_END = taiexData.length - 2;  // 排除最後 1 日（當日未收盤確認）
             const SCAN_BGN = Math.max(WIN, taiexData.length - 44); // 近 2 個月
 
-            let pivotLow = null;
-            for (let i = SCAN_END; i >= SCAN_BGN; i--) {
-              const windowPrices = taiexData.slice(i - WIN, i + WIN + 1).map(d => d.close);
-              const localMin = Math.min(...windowPrices);
-              if (taiexData[i].close > localMin) continue; // 不是局部最低
-
-              // 確認之後有往上走（後 2 日內有收盤 > 低點）
+            // 擺盪低點：前後 WIN 日內的最低收盤，且之後 2 日內有收盤高於它（確認止跌）
+            const isPivot = i => {
+              const localMin = Math.min(...taiexData.slice(i - WIN, i + WIN + 1).map(d => d.close));
+              if (taiexData[i].close > localMin) return false;
               const afterSlice = taiexData.slice(i + 1, i + 3);
-              const afterHigh  = afterSlice.length ? Math.max(...afterSlice.map(d => d.close)) : 0;
-              if (afterSlice.length === 0 || afterHigh <= taiexData[i].close) continue;
+              return afterSlice.length > 0 && Math.max(...afterSlice.map(d => d.close)) > taiexData[i].close;
+            };
 
-              pivotLow = taiexData[i];
-              break;
+            let pivotIdx = -1;
+            for (let i = SCAN_END; i >= SCAN_BGN; i--) { if (isPivot(i)) { pivotIdx = i; break; } }
+            if (pivotIdx < 0) throw new Error('近 2 個月無法偵測到有效擺盪低點');
+
+            // 前前低、前前前低：往前一年內，依序找「比上一個低點再低 1% 以上」的擺盪低點（一層一層往下的支撐）
+            const lowIdx = [pivotIdx];
+            const OLD_BGN = Math.max(WIN, taiexData.length - 250);
+            for (let i = pivotIdx - 1; i >= OLD_BGN && lowIdx.length < 3; i--) {
+              const ref = taiexData[lowIdx[lowIdx.length - 1]].close;
+              if (taiexData[i].close < ref * 0.99 && isPivot(i)) lowIdx.push(i);
             }
+            const LV_STYLE = [
+              { key: 'lv1', name: '前低',     color: '#ef4444', dash: '8 4' },
+              { key: 'lv2', name: '前前低',   color: '#f97316', dash: '4 4' },
+              { key: 'lv3', name: '前前前低', color: '#fbbf24', dash: '1.5 3.5' },
+            ];
+            const levels = lowIdx.map((i, k) => ({ ...LV_STYLE[k], value: taiexData[i].close, date: taiexData[i].date }));
 
-            if (!pivotLow) throw new Error('近 2 個月無法偵測到有效擺盪低點');
-
-            const KEY_LOW  = pivotLow.close;
-            const KEY_DATE = pivotLow.date;
+            const KEY_LOW  = levels[0].value;
+            const KEY_DATE = levels[0].date;
 
             const current = taiexData[taiexData.length - 1];
             const diff    = current.close - KEY_LOW;
@@ -2147,19 +2175,34 @@
             const isAbove = current.close > KEY_LOW;
             const status  = isAbove ? 'green' : 'red';
 
+            const rel = v => { const r = (current.close / v - 1) * 100; return `現價${r >= 0 ? '高於' : '低於'}此線 ${Math.abs(r).toFixed(1)}%`; };
+            const fmtLv = l => `${l.name} ${l.date} ${Math.round(l.value).toLocaleString()}（${rel(l.value)}）`;
+            const dropTo = v => `${((1 - v / current.close) * 100).toFixed(1)}%`;   // 由現價跌到該線的幅度
+            const nextSup = levels.find(l => l.value < current.close);
+            const M1_PLAIN = isAbove
+              ? `大盤還站在前低 ${Math.round(KEY_LOW).toLocaleString()} 之上，近期最低點沒被跌破，短線的多方防線仍守住；只要收盤不跌破這條線，就不必急著出場。再跌 ${dropTo(KEY_LOW)} 會碰到前低。`
+              : `大盤已跌破前低 ${Math.round(KEY_LOW).toLocaleString()}，近期低點的防線失守，短線轉弱，這通常是減碼或停損的訊號。`
+                + (nextSup ? `下一道支撐看${nextSup.name} ${Math.round(nextSup.value).toLocaleString()}（再跌 ${dropTo(nextSup.value)} 會碰到），守住就有機會止跌；再跌破，跌勢可能擴大。`
+                   : levels.length > 1 ? `連${levels.slice(1).map(l => `${l.name} ${Math.round(l.value).toLocaleString()}`).join('、')} 也都跌破了，近一年的 ${levels.length} 道支撐全部失守，跌勢偏重，宜保守，等重新站回前低再說。`
+                   : '近一年找不到更低的支撐，跌勢偏重，宜保守。');
+
             // 圖表：近 120 日 TAIEX + 分水嶺水平線
             setModuleData(prev => ({...prev, M1: {
               status,
               alignedData: taiexData.slice(-60).map(d => ({ date: d.date, value: d.close })),
-              summary: `自動偵測分水嶺：${KEY_DATE} 收盤低點 ${KEY_LOW.toLocaleString()}。當前大盤 ${current.close.toLocaleString()}，${isAbove ? '✅ 站上' : '❌ 跌破'}分水嶺 ${diff > 0 ? '+' : ''}${Math.round(diff)}（${diffPct}%）。`,
-              chartTitle: `加權指數 vs 自動分水嶺 ${KEY_LOW.toLocaleString()}（紅線）`,
-              legend: (
-                <span className="flex items-center gap-1">
-                  <span className="w-3 h-0.5 inline-block" style={{backgroundColor:'#ef4444'}}></span>前低
-                </span>
-              ),
+              summary: `自動偵測分水嶺：${KEY_DATE} 收盤低點 ${KEY_LOW.toLocaleString()}。當前大盤 ${current.close.toLocaleString()}，${isAbove ? '✅ 站上' : '❌ 跌破'}分水嶺 ${diff > 0 ? '+' : ''}${Math.round(diff)}（${diffPct}%）。${levels.length > 1 ? '更早的支撐：' + levels.slice(1).map(fmtLv).join('；') + '。' : ''}`,
+              plain: M1_PLAIN,
+              chartTitle: '加權指數 vs 前低／前前低／前前前低',
+              legend: (<>
+                {levels.map(l => (
+                  <span key={l.key} className="flex items-center gap-1 whitespace-nowrap" style={{ color: l.color }}>
+                    <svg width="18" height="4"><line x1="0" y1="2" x2="18" y2="2" stroke={l.color} strokeWidth="2" strokeDasharray={l.dash} /></svg>{l.name}
+                  </span>
+                ))}
+                <span className="text-yellow-400 whitespace-nowrap">— 季線</span>
+              </>),
               renderChart: () => (
-                <M1ZoomChart taiexData={taiexData} keyLevel={KEY_LOW} />
+                <M1ZoomChart taiexData={taiexData} levels={levels} />
               ),
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M1:e.message})); }
@@ -2198,6 +2241,8 @@
               status,
               alignedData: tsmcData.slice(-60).map(d => ({ date: d.date, value: d.close })),
               summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，0050${etf50Above?'站上':'跌破'}季線。共 ${aboveCount}/4 檔位於季線之上。`,
+              plain: `季線是近 3 個月的平均成本，站上代表買的人多半賺錢、走勢偏強。4 檔權值股有 ${aboveCount} 檔站上季線；台積電占大盤權重最大，它${tsmcAbove ? '守住季線，大盤就有支撐' : '跌破季線，大盤很難強起來'}。`
+                + (aboveCount >= 3 ? '權值股整體健康，是撐盤的主力。' : aboveCount <= 1 ? '多數權值股轉弱，大盤缺少領頭羊，宜保守。' : '權值股強弱分歧，大盤容易來回震盪。'),
               chartTitle: '權值股走勢（近 120 日）',
               legend: (
                 <span className="flex items-center gap-1">
@@ -2255,6 +2300,9 @@
               status,
               alignedData: sortedDates.slice(-60).map(date => ({ date, value: byDate[date] })),
               summary: `大盤籌碼統計：外資近 ${n} 個交易日合計買賣超為 ${last5Total > 0 ? '+' : ''}${Math.round(last5Total)} 億元。`,
+              plain: last5Total > 100 ? `外資近 ${n} 天合計買超 ${Math.round(last5Total)} 億，大戶資金持續流入台股，對指數是助力。`
+                : last5Total < -100 ? `外資近 ${n} 天合計賣超 ${Math.round(-last5Total)} 億，大戶資金在撤出，指數要往上會比較吃力。`
+                : `外資近 ${n} 天買賣金額不大（${Math.round(last5Total)} 億），沒有明顯方向，還在觀望。`,
               chartTitle: '外資大盤買賣超（近 60 日，億元）',
               renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} />,
             }}));
@@ -2323,23 +2371,21 @@
             if (cleanScore >= 65) { status = 'green'; cleanLabel = '乾淨'; }
             if (cleanScore < 40)  { status = 'red';   cleanLabel = '混濁'; }
 
-            const fmt = v => v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1);
-
             setModuleData(prev => ({...prev, M4: {
               status,
               alignedData: series.map(d => ({ date: d.date, value: Math.round(d.margin / 100000) })),
-              summary: `籌碼${cleanLabel}（乾淨度 ${Math.round(cleanScore)}/100）。融資水位處近期 ${Math.round(marginPct)}% 分位，近6日${marginTrend < 0 ? '縮減' : '增加'} ${fmt(marginTrend)}%；融券/融資比 ${cur.ratio.toFixed(2)}%，處近期 ${Math.round(ratioPct)}% 分位。`,
-              chartTitle: '融資餘額（紫）與融券/融資比（橙）（近 60 日）',
-              legend: (
-                <div className="flex gap-3">
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#c084fc'}}></span>融資</span>
-                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#fb923c'}}></span>融券/融資比</span>
-                </div>
-              ),
+              summary: `籌碼${cleanLabel}（乾淨度 ${Math.round(cleanScore)}/100）。融資水位處近期 ${Math.round(marginPct)}% 分位，近 6 日${marginTrend < 0 ? '縮減' : '增加'} ${Math.abs(marginTrend).toFixed(1)}%；券資比 ${cur.ratio.toFixed(2)}%，處近期 ${Math.round(ratioPct)}% 分位。`,
+              plain: `融資是散戶借錢買股，融資越高、增加越快，代表散戶追得越兇、籌碼越亂。目前融資在近期的 ${Math.round(marginPct)}% 位置（${marginPct >= 70 ? '偏高' : marginPct <= 30 ? '偏低' : '中間'}），近 6 日${marginTrend < 0 ? '減少' : '增加'} ${Math.abs(marginTrend).toFixed(1)}%。`
+                + (status === 'green' ? '散戶槓桿在退場，籌碼乾淨，跌勢比較容易止穩。' : status === 'red' ? '散戶槓桿偏重，一旦下跌容易引發斷頭賣壓。' : '籌碼不算乾淨也不算混亂。'),
+              chartTitle: '融資餘額與券資比（近 60 日）',
+              legend: (<>
+                <span className="flex items-center gap-1 whitespace-nowrap"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#c084fc'}}></span>融資</span>
+                <span className="flex items-center gap-1 whitespace-nowrap"><span className="w-2 h-2 rounded-full inline-block" style={{backgroundColor:'#fb923c'}}></span>券資比</span>
+              </>),
               renderChart: () => (
                 <div className="flex flex-col gap-3">
-                  <SvgLineChart data={series} lines={[{key:'margin', color:'#c084fc', width:'2'}]} height={70} />
-                  <SvgLineChart data={series} lines={[{key:'ratio',  color:'#fb923c', width:'2'}]} height={50} />
+                  <SvgLineChart data={series} lines={[{key:'margin', color:'#c084fc', width:'2'}]} height={70} fmt={v => `${Math.round(v / 1e4).toLocaleString()} 萬張`} />
+                  <SvgLineChart data={series} lines={[{key:'ratio',  color:'#fb923c', width:'2'}]} height={50} fmt={v => `${v.toFixed(2)}%`} />
                 </div>
               ),
             }}));
@@ -2379,6 +2425,11 @@
               status: m4Status,
               alignedData: volTd.slice(-60).map(d => ({ date: d.date, value: d.volume })),
               summary: `大盤最近有量交易日（${lastVol.date}${lastVol.date !== last.date ? '，最新一日成交量尚未回填' : ''}）成交量約 ${Math.round(lastVol.volume)} 億，為十日均量的 ${(volRatio*100).toFixed(0)}%。呈現量${volRatio>1?'增':'縮'}價${priceUp?'漲':'跌'}。`,
+              plain: `成交量是 ${(volRatio*100).toFixed(0)}% 的十日均量，${volRatio > 1 ? '比平常熱絡' : '比平常冷清'}。`
+                + (volRatio > 1 && priceUp ? '有量又上漲，代表買盤積極，這波上漲比較可信。'
+                  : volRatio > 1 ? '放量下跌，代表有人急著賣，賣壓沉重，要小心。'
+                  : priceUp ? '上漲但量能不足，追價意願不強，漲勢可能走不遠。'
+                  : '下跌但量縮，賣壓不算重，比較像是整理。'),
               chartTitle: '加權指數成交量（近 60 日，億）',
               renderChart: () => <SvgBarChart data={volTd.slice(-60)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
             }}));
@@ -2398,6 +2449,16 @@
               status: m5Status,
               rally20d,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.macd ?? null })),
+              plain: (() => {
+                const lv = [['季線', over60], ['半年線', over120], ['年線', over240]].filter(x => x[1] != null);
+                const up = lv.filter(x => x[1]).map(x => x[0]), dn = lv.filter(x => !x[1]).map(x => x[0]);
+                const head = '季線、半年線、年線分別是近 3 個月、半年、1 年的平均成本。';
+                const body = !dn.length ? '三條均線都站上，短中長期都是多頭。'
+                  : !up.length ? '三條均線全部跌破，短中長期都偏空，宜保守。'
+                  : over240 && !over60 ? `跌破${dn.join('、')}，但仍在年線之上：短中期轉弱，長線多頭格局沒壞，屬於多頭中的修正，年線 ${last.sma240.toFixed(0)} 是重要防守點。`
+                  : `站上${up.join('、')}，跌破${dn.join('、')}，多空交錯。`;
+                return head + body + (last.macd < 0 ? '動能指標 MACD 為負，跌勢還沒結束。' : '動能指標 MACD 為正，買盤仍有力道。');
+              })(),
               summary: `加權指數${over60?'站上':'跌破'}季線，${over120?'站上':'跌破'}半年線${over240 == null ? '' : `，${over240?'站上':'跌破'}年線（${last.sma240.toFixed(0)}）`}。MACD 值為 ${last.macd.toFixed(1)}。`,
               chartTitle: '加權指數走勢與季線（黃）/半年線（紫）/年線（藍）（近 120 日）',
               renderChart: () => (
@@ -2450,6 +2511,8 @@
                   .concat([{ date: nextTD(s[s.length-1].date), value: s[s.length-1].close }]);
               })(),
               summary: `${displayName} 近 5 日漲跌幅為 ${rate > 0 ? '+' : ''}${rate.toFixed(2)}%。`,
+              plain: `費城半導體指數是全球半導體股的風向球，台股有很大比重是半導體。近 5 日${rate > 0 ? '上漲' : '下跌'} ${Math.abs(rate).toFixed(1)}%，`
+                + (rate > 2 ? '美國半導體股走強，台股電子股通常跟著受惠。' : rate < -3 ? '美國半導體股明顯下跌，台股電子股容易被拖累。' : '變化不大，對台股影響有限。'),
               chartTitle: `${displayName} 走勢（近 60 日）`,
               renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
             }}));
@@ -2532,6 +2595,9 @@
             setModuleData(prev => ({...prev, M8: {
               status,
               alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.total })),
+              plain: `八大公股銀行常被稱為「國家隊」，大跌時會進場護盤。近 5 日合計 ${fmt(sum5)}，`
+                + (status === 'green' ? '正在買進，代表官方資金在下方承接，跌幅可能被壓縮。' : status === 'red' ? '在賣出，沒有護盤跡象，跌勢少了緩衝。' : '買賣方向不一致，護盤意圖不明確。')
+                + (consecutiveBuy >= 3 ? `已連續買超 ${consecutiveBuy} 天。` : ''),
               summary: `八大公股銀行近5日合計 ${fmt(sum5)}（億元）。最新一日 ${fmt(latest.total)}，連續${consecutiveBuy > 0 ? `買超 ${consecutiveBuy} 日` : '賣超'}。${status === 'green' ? '護盤力道介入中。' : status === 'red' ? '公股銀行撤出，無護盤訊號。' : '買賣方向混合。'}`,
               chartTitle: '八大公股銀行買賣超合計（近 60 日，億元）',
               renderChart: () => (
@@ -2620,6 +2686,10 @@
             setModuleData(prev => ({...prev, M11: {
               status: c.status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.hist })),
+              plain: `MACD 柱體看中期動能，KD 看短線轉折。柱體${histPos ? '為正' : '為負'}且${expanding ? '持續擴大' : '正在縮小'}，`
+                + (histPos ? (expanding ? '多頭動能還在增強；' : '上漲力道在減弱；') : (expanding ? '下跌動能還在增強，先別急著接；' : '跌勢有放緩跡象，可以開始留意轉折；'))
+                + `K 值${kAbove ? '在 D 值之上，短線偏強。' : '在 D 值之下，短線偏弱。'}`
+                + (last.k < 20 ? '目前在超賣區，短線跌深，隨時可能反彈，但也可能繼續超賣（鈍化）。' : last.k > 80 ? '目前在超買區，短線漲多，追高要小心。' : ''),
               summary: <M11Summary info={sigInfo} base={`MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}`} />,
               chartTitle: '▲買進 ▼賣出（依所選策略）· 連線＝一個波段',
               legend: (<>
@@ -2670,8 +2740,21 @@
             setModuleData(prev => ({...prev, M12: {
               status: 'info',
               alignedData: rows.slice(-60).map(d => ({ date: d.date, value: d.exTsmc })),
+              plain: (() => {
+                const dt = new Date(last.date); dt.setFullYear(dt.getFullYear() - 1);
+                const cut = dt.toISOString().slice(0, 10);
+                let o = null; for (let i = n - 1; i >= 0; i--) { if (rows[i].date <= cut) { o = rows[i]; break; } }
+                const head = `外資持股比重目前在 ${rows[0].date.slice(0, 4)} 年以來的 ${pos}% 位置（0% 是最低、100% 是最高），`
+                  + (pos >= 70 ? '處於歷史偏高水位，外資對台股的參與度高。' : pos <= 30 ? '處於歷史偏低水位，外資參與度低。' : '處於歷史中段。');
+                if (!o || o.index == null || last.index == null) return head;
+                const dr = last.ratio - o.ratio, di = (last.index / o.index - 1) * 100;
+                return head + (di > 0 && dr < 0 ? `近一年指數漲 ${di.toFixed(0)}%，外資持股比重卻降 ${(-dr).toFixed(2)} 個百分點，代表漲勢主要靠內資推動，或外資逢高調節。`
+                  : di > 0 && dr >= 0 ? `近一年指數漲 ${di.toFixed(0)}%，外資持股比重也增加 ${dr.toFixed(2)} 個百分點，外資和指數同步看好。`
+                  : di <= 0 && dr < 0 ? `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重也降 ${(-dr).toFixed(2)} 個百分點，外資在撤出。`
+                  : `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重卻增加 ${dr.toFixed(2)} 個百分點，外資逢低布局。`);
+              })(),
               summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（不含台積電 ${last.exTsmc.toFixed(2)}%）。資料自 ${rows[0].date} 起（${n} 筆）的區間為 ${rMin.toFixed(2)}%~${rMax.toFixed(2)}%，目前位於 ${pos}% 位置。${horizons.length ? '持股比重較 ' + horizons.join('、') + '。' : ''}`,
-              chartTitle: '持股比重 vs 加權指數（1／3／5／10／15 年，兩軸各自自動縮放）',
+              chartTitle: '持股比重 vs 加權指數（半年～10 年，兩軸各自自動縮放）',
               legend: (<>
                 <span className="text-blue-400 whitespace-nowrap">— 左軸：持股比重</span>
                 <span className="text-red-400 whitespace-nowrap">- - 右軸：加權指數</span>
@@ -2691,10 +2774,17 @@
             const rows = fh.sort((a, b) => a.date.localeCompare(b.date));
             if (rows.length < 200) throw new Error('外資持股資料不足。');
             const last = rows[rows.length - 1];
+            const maAt = (i, w) => i + 1 >= w ? rows.slice(i + 1 - w, i + 1).reduce((t, d) => t + d.ratio, 0) / w : null;
+            const nR = rows.length, above = maAt(nR - 1, 30) > maAt(nR - 1, 90);
+            let crossAt = null;
+            for (let i = nR - 1; i > 90; i--) {
+              if ((maAt(i, 30) > maAt(i, 90)) !== (maAt(i - 1, 30) > maAt(i - 1, 90))) { crossAt = rows[i].date; break; }
+            }
             setModuleData(prev => ({...prev, M13: {
               status: 'info',
+              plain: `以預設的 30／90 日均線來看，外資持股的短均線目前在長均線${above ? '之上' : '之下'}，代表外資持股趨勢${above ? '向上，策略處於持有（金叉後）' : '向下，策略處於空手（死叉後）'}${crossAt ? `，上一次交叉在 ${crossAt}` : ''}。這是跟著外資長線進出的擇時參考，不計入評分。`,
               summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（${last.date}）。以持股比重的短均線（20／30／60 日）由下穿越長均線（60／90／180 日）為金叉買進、由上穿越為死叉賣出，可切換均線參數與買進標的（加權指數、ETF、個股、正 2），圖上標示金叉死叉、買賣點與波段報酬，並與買進持有對照。回測僅供參考，不計入評分。`,
-              chartTitle: '標的 K 線＋買賣標記（上）／外資持股比重與均線（下）· 1／2／3／4／5／10／15 年',
+              chartTitle: '標的 K 線＋買賣標記（上）／外資持股比重與均線（下）· 1／2／3／5／10／15 年',
               renderBlock: (ex, head) => <ForeignTimingChart rows={rows} expanded={ex} head={head} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M13:e.message})); }
@@ -2767,6 +2857,11 @@
 
             setModuleData(prev => ({...prev, M14: {
               status,
+              plain: `EMA200 約等於近 10 個月的平均成本，是長線多空的分界。`
+                + (above200 ? `大盤在 EMA200 之上 ${dist200.toFixed(1)}%，長線仍是多頭` : `大盤跌破 EMA200（${dist200.toFixed(1)}%），長線轉弱，宜保守`)
+                + (above200 ? (above50 ? '，短線也站穩 EMA50，趨勢健康。' : '，但短線跌破 EMA50，屬於多頭中的回檔。') : '。')
+                + (last.close < last.bbL ? '收盤跌到布林下軌之下，短線跌深，常出現技術性反彈，但要等收盤回到下軌之上（BB Long）才算買進訊號。'
+                  : last.close > last.bbU ? '收盤衝到布林上軌之上，短線漲多過熱，要等收盤回到上軌之下（BB Short）才算賣出訊號。' : ''),
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.close - d.ema200 })),
               summary: `${trendTxt}。收盤 ${last.close.toFixed(0)}，EMA200 ${last.ema200.toFixed(0)}（${dist200 >= 0 ? '+' : ''}${dist200.toFixed(1)}%，${slopeUp ? '向上' : '向下'}），EMA50 ${last.ema50.toFixed(0)}（EMA50 在 EMA200 ${last.ema50 > last.ema200 ? '上方' : '下方'}）。MACD 柱體${last.osc > 0 ? '為正' : '為負'}。${rsiTxt}${bbTxt}${crossTxt}${sigTxt}此模組僅供趨勢參考，不計入評分。`,
               chartTitle: '收盤 / EMA50 / EMA200 / 布林通道 · BB Long／BB Short 標記與進出場',
@@ -2812,6 +2907,8 @@
             setModuleData(prev => ({...prev, M10: {
               status,
               alignedData: series.slice(-60).map(d => ({ date: d.date, value: d.ratio })),
+              plain: `外資持股比重代表外資在台股放了多少錢。近 20 天${d20 >= 0 ? '增加' : '減少'} ${Math.abs(d20).toFixed(2)} 個百分點、近 5 天${d5 >= 0 ? '增加' : '減少'} ${Math.abs(d5).toFixed(2)} 個百分點，`
+                + (status === 'green' ? '外資在加碼台股，中長線偏多。' : status === 'red' ? '外資明顯在減碼；如果指數還在高檔，屬於背離，要提高警覺。' : '變化不大，外資態度觀望。'),
               summary: `外資持股占上市總市值 ${latest.ratio.toFixed(2)}%（不含台積電 ${latest.exTsmc.toFixed(2)}%）。近 20 日 ${sg(d20)}pp、近 5 日 ${sg(d5)}pp${d60 != null ? `、近 60 日 ${sg(d60)}pp` : ''}，位於近 ${n} 日區間的 ${pos}% 位置。持股 ≥50% 的個股 ${latest.over50} 檔。${status === 'green' ? '外資持股比重回升，籌碼面偏多。' : status === 'red' ? '外資持股比重明顯下降（近 20 日降逾 1pp），若指數同步在高檔屬背離，需提高警覺。' : '外資持股比重變動不大，方向未明。'}`,
               chartTitle: `評分指標（近 ${n} 日）· 完整走勢與加權指數對照見 M12`,
               renderChart: () => {
@@ -2911,6 +3008,8 @@
             setModuleData(prev => ({...prev, M9: {
               status,
               alignedData: afterMkt.slice(-60).map(d => ({ date: d.date, value: parseFloat(d.spread_per.toFixed(2)) })),
+              plain: `夜盤是台指期在台股收盤後的交易，可以先看出隔天開盤的方向。最新夜盤${latest.spread_per > 0 ? '上漲' : '下跌'} ${Math.abs(latest.spread_per).toFixed(2)}%，近 5 天${bullDays}天漲、${bearDays}天跌，`
+                + (status === 'green' ? '情緒偏多，隔天開盤偏向開高。' : status === 'red' ? '情緒偏空，隔天開盤可能開低，留意風險。' : '多空互見，隔天開盤方向不明。'),
               summary: `台指期夜盤最新（${latest.date}）${dirStr}，收 ${latest.close} 點${basisStr}。近5日多${bullDays}空${bearDays}。${status === 'green' ? (latest.spread_per >= 2 ? `單日大漲 ${latest.spread_per.toFixed(1)}%，夜盤強勢看多。` : '夜盤偏多，市場情緒樂觀。') : status === 'red' ? (latest.spread_per <= -2 ? `單日大跌 ${latest.spread_per.toFixed(1)}%，夜盤顯著看空，明日開盤留意風險。` : '夜盤連續偏空，市場情緒謹慎。') : '夜盤方向混合，觀望為宜。'}`,
               chartTitle: '台指期夜盤漲跌幅（近 60 日，%）',
               renderChart: () => (
