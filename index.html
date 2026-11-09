@@ -82,10 +82,9 @@
     // ==========================================
     // 1. 設定與工具函數
     // ==========================================
-    const DEFAULT_FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMi0wOCAyMzoyODoyMSIsInVzZXJfaWQiOiJzdGV2ZW40ZGV2IiwiZW1haWwiOiJzdGV2ZW40ZGV2QGdtYWlsLmNvbSIsImlwIjoiMTExLjcxLjE4LjY5In0.HjXvn-fgUl_piw0GkPNZOwlebOUKPmPmUZTtCqk55b4";
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261106.01';
+    const APP_VERSION = 'v 20261109.01';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -611,7 +610,7 @@
       const TOGGLES = [
         { label: 'EMA200 濾網', on: filter, set: setFilter, desc: '收盤在 EMA200 之上才買' },
         { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價跌 5% 出場' },
-        { label: '提早進場', on: early, set: setEarly, desc: '收盤首次跌破下軌就買' },
+        { label: '提早進場', on: early, set: v => { setEarly(v); if (!early) setStop(true); }, desc: '收盤首次跌破下軌就買（逆勢接刀，開啟時自動帶入停損）' },
       ];
 
       return (
@@ -706,6 +705,20 @@
     };
 
     // M12 圖表：外資持股比重 vs 加權指數（長期，雙軸各自自動縮放；X 軸依日期比例排列）
+    // 近一個月外資持股比重（pp）與加權指數（%）的實際變化；用於 M12 文字說明，與圖表區間無關
+    const monthMove = rows => {
+      const n = rows.length, last = rows[n - 1];
+      if (last.index == null) return null;
+      const d = new Date(last.date); d.setDate(d.getDate() - 30);
+      const cut = d.toISOString().slice(0, 10);
+      let o = null;
+      for (let i = n - 1; i >= 0; i--) { if (rows[i].date <= cut && rows[i].index != null) { o = rows[i]; break; } }
+      if (!o) return null;
+      const dr = last.ratio - o.ratio, di = (last.index / o.index - 1) * 100;
+      const label = di >= 0 && dr >= 0 ? '同步看好' : di < 0 && dr < 0 ? '外資同步撤出' : di < 0 ? '外資逆勢加碼' : '外資逢高調節';
+      return { dr, di, label };
+    };
+
     const ForeignLongChart = ({ rows }) => {
       const { useMemo, useRef, useCallback } = React;
       const [years, setYears] = useState(5);
@@ -765,24 +778,9 @@
       const hd = hov != null ? view[hov] : null;
       const tipLeft = hov != null && fx(hov) > 0.6;
 
-      // 金叉／死叉：持股比重線（左軸）由下往上穿越加權指數線（右軸）＝金叉；由上往下＝死叉。
-      // 兩軸各自自動縮放，因此交會點依目前區間而定（只代表兩條線相對位置的轉換，不是絕對數值相等）。
-      const yRn = i => (view[i].ratio - rs.lo) / (rs.hi - rs.lo);
-      const yIn = i => (view[i].index - is.lo) / (is.hi - is.lo);
-      const crosses = [];
-      if (is) {
-        for (let i = 1; i < n; i++) {
-          if (view[i - 1].index == null || view[i].index == null) continue;
-          const d0 = yRn(i - 1) - yIn(i - 1), d1 = yRn(i) - yIn(i);
-          if ((d0 <= 0 && d1 > 0) || (d0 >= 0 && d1 < 0)) {
-            const tt = d0 / (d0 - d1);
-            crosses.push({ gold: d1 > 0, date: view[i].date, fx: fx(i - 1) + tt * (fx(i) - fx(i - 1)),
-              top: (1 - (yRn(i - 1) + tt * (yRn(i) - yRn(i - 1)))) * 100 });
-          }
-        }
-      }
-      const nGold = crosses.filter(c => c.gold).length;
-      const showLbl = crosses.length <= 24;
+      // 原本的「金叉／死叉」是兩條各自縮放的線在畫面上交會，會隨區間改變而出現或消失，不具訊號意義，已移除。
+      // 改以近一個月的實際變化（持股比重 pp、指數 %）描述外資與指數的關係，與所選區間無關。
+      const m1 = monthMove(rows);
 
       return (
         <>
@@ -790,8 +788,7 @@
             <p className="text-xs text-gray-400">
               最新 <span className="text-blue-400 font-bold">{last.ratio.toFixed(2)}%</span>（{last.date}）
               {' · '}區間高 {hiR.ratio.toFixed(2)}%（{hiR.date}）{' · '}區間低 {loR.ratio.toFixed(2)}%（{loR.date}）
-              {' · '}<span className="text-red-400">金叉 {nGold}</span> / <span className="text-green-400">死叉 {crosses.length - nGold}</span>
-              <span className="text-gray-500">（持股比重線穿越指數線；兩軸各自縮放，依區間而異）</span>
+              {m1 && <>{' · '}近一個月 指數 <span className={m1.di >= 0 ? 'text-red-400' : 'text-green-400'}>{m1.di >= 0 ? '+' : ''}{m1.di.toFixed(1)}%</span>、持股 <span className={m1.dr >= 0 ? 'text-red-400' : 'text-green-400'}>{m1.dr >= 0 ? '+' : ''}{m1.dr.toFixed(2)}pp</span>（{m1.label}）</>}
               {view[0].date < DAILY_FROM && <span className="text-gray-500">{' · '}{DAILY_FROM.slice(0, 7)} 之前為每週一筆</span>}
               {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {years} 年</span>}
             </p>
@@ -822,21 +819,6 @@
                 <path d={mk('ratio', rs)} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 {hov != null && <line x1={fx(hov) * W} x2={fx(hov) * W} y1="0" y2={H} stroke="#9ca3af" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
               </svg>
-              {crosses.map((c, k) => {
-                const col = c.gold ? '#ef4444' : '#22c55e';
-                return (
-                  <div key={k} className="absolute pointer-events-none" title={`${c.date} ${c.gold ? '金叉' : '死叉'}`}
-                    style={{ left: `${c.fx * 100}%`, top: `${c.top}%`, transform: 'translate(-50%,-50%)' }}>
-                    <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#111827', border: `2.5px solid ${col}` }} />
-                    {showLbl && (
-                      <span className="absolute left-1/2 text-[10px] font-bold text-white rounded px-1 whitespace-nowrap"
-                        style={{ background: col, transform: 'translateX(-50%)', ...(c.gold ? { top: 14 } : { bottom: 14 }) }}>
-                        {c.gold ? '金叉' : '死叉'}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
               {hd && (
                 <div className="absolute top-2 z-10 pointer-events-none bg-gray-900/90 border border-gray-600 rounded-lg px-3 py-2 text-xs leading-relaxed whitespace-nowrap"
                   style={tipLeft ? { right: `${100 - fx(hov) * 100 + 1}%` } : { left: `${fx(hov) * 100 + 1}%` }}>
@@ -2103,7 +2085,9 @@
     // 5. App
     // ==========================================
     function App() {
-      const [token, setToken] = useState(localStorage.getItem('finmind_token') || DEFAULT_FINMIND_TOKEN);
+      // FinMind Token 不再寫在原始碼：每日資料由 GitHub Actions（Secrets）預先抓好放在 data/；
+      // 使用者可自行輸入 Token（只存在自己的瀏覽器），用來補抓當天尚未更新的資料。
+      const [token, setToken] = useState(() => { try { return localStorage.getItem('finmind_token') || ''; } catch (e) { return ''; } });
       const [showTokenInput, setShowTokenInput] = useState(false);
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
@@ -2212,12 +2196,10 @@
         // M2
         const processM1 = async () => {
           try {
-            const [tsmc, delta, mtk, etf50] = await Promise.all([
-              fetchFinMind('TaiwanStockPrice', '2330', token, startDate),
-              fetchFinMind('TaiwanStockPrice', '2308', token, startDate),
-              fetchFinMind('TaiwanStockPrice', '2454', token, startDate),
-              fetchFinMind('TaiwanStockPrice', '0050', token, startDate),
-            ]);
+            const loadStock = id => loadWithDelta(`./data/stock-${id}.json`,
+              start => fetchFinMind('TaiwanStockPrice', id, token, start || startDate).then(r => r.map(d => ({ date: d.date, close: d.close }))));
+            const [tsmc, delta, mtk, etf50] = await Promise.all(['2330', '2308', '2454', '0050'].map(loadStock));
+            if ([tsmc, delta, mtk, etf50].some(a => a.length < 61)) throw new Error('權值股資料不足（等待每日資料更新）');
             const tsmcData  = calculateSMA(tsmc.map(d => ({ date:d.date, close:d.close })), 60);
             const deltaData = calculateSMA(delta.map(d => ({ date:d.date, close:d.close })), 60);
             const mtkData   = calculateSMA(mtk.map(d => ({ date:d.date, close:d.close })), 60);
@@ -2313,30 +2295,25 @@
         // M3 籌碼乾淨度
         const processM3 = async () => {
           try {
-            const data = await fetchFinMindFallback([
+            // FinMind 每日有多種 row，依 name 區分：MarginPurchase＝融資餘額（張）、ShortSale＝融券餘額（張）
+            const toMargin = data => {
+              const byDate = {};
+              data.forEach(d => {
+                if (!byDate[d.date]) byDate[d.date] = { date: d.date, margin: 0, short: 0 };
+                if (d.name === 'MarginPurchase') byDate[d.date].margin = Number(d.TodayBalance) || 0;
+                if (d.name === 'ShortSale')      byDate[d.date].short  = Number(d.TodayBalance) || 0;
+              });
+              return Object.values(byDate).filter(d => d.margin > 0);
+            };
+            const mRows = await loadWithDelta('./data/margin.json', start => fetchFinMindFallback([
               { dataset:'TaiwanStockTotalMarginPurchaseShortSale', dataId:'' },
               { dataset:'TaiwanStockMarginPurchaseShortSale', dataId:'TAIEX' },
               { dataset:'TaiwanStockMarginPurchaseShortsale', dataId:'TAIEX' },
-            ], token, recentDate);
+            ], token, start || recentDate).then(toMargin));
+            if (mRows.length < 5) throw new Error('可用籌碼數據不足');
 
-            // 每日有三種 row，依 name 欄位區分
-            // name: "MarginPurchase" → 融資餘額（張）
-            // name: "ShortSale"      → 融券餘額（張）
-            const byDate = {};
-            data.forEach(d => {
-              if (!byDate[d.date]) byDate[d.date] = { margin: 0, short: 0 };
-              if (d.name === 'MarginPurchase') byDate[d.date].margin = Number(d.TodayBalance) || 0;
-              if (d.name === 'ShortSale')      byDate[d.date].short  = Number(d.TodayBalance) || 0;
-            });
-
-            const sortedDates = Object.keys(byDate).sort().filter(d => byDate[d].margin > 0);
-            if (sortedDates.length < 5) throw new Error('可用籌碼數據不足');
-
-            const series = sortedDates.slice(-60).map(date => ({
-              date,
-              margin: byDate[date].margin,
-              short:  byDate[date].short,
-              ratio:  byDate[date].margin > 0 ? (byDate[date].short / byDate[date].margin) * 100 : 0,
+            const series = mRows.slice(-60).map(d => ({
+              ...d, ratio: d.margin > 0 ? (d.short / d.margin) * 100 : 0,
             }));
 
             const cur  = series[series.length - 1];
@@ -2746,20 +2723,21 @@
                 let o = null; for (let i = n - 1; i >= 0; i--) { if (rows[i].date <= cut) { o = rows[i]; break; } }
                 const head = `外資持股比重目前在 ${rows[0].date.slice(0, 4)} 年以來的 ${pos}% 位置（0% 是最低、100% 是最高），`
                   + (pos >= 70 ? '處於歷史偏高水位，外資對台股的參與度高。' : pos <= 30 ? '處於歷史偏低水位，外資參與度低。' : '處於歷史中段。');
-                if (!o || o.index == null || last.index == null) return head;
+                const mm = monthMove(rows);
+                const recent = mm ? `近一個月指數${mm.di >= 0 ? '漲' : '跌'} ${Math.abs(mm.di).toFixed(1)}%、外資持股${mm.dr >= 0 ? '增加' : '減少'} ${Math.abs(mm.dr).toFixed(2)} 個百分點，屬於「${mm.label}」。` : '';
+                const tail = '（這是長期對照，不是買賣訊號：回測顯示外資與指數背離後，指數並沒有比平常更容易上漲。）';
+                if (!o || o.index == null || last.index == null) return head + recent + tail;
                 const dr = last.ratio - o.ratio, di = (last.index / o.index - 1) * 100;
                 return head + (di > 0 && dr < 0 ? `近一年指數漲 ${di.toFixed(0)}%，外資持股比重卻降 ${(-dr).toFixed(2)} 個百分點，代表漲勢主要靠內資推動，或外資逢高調節。`
                   : di > 0 && dr >= 0 ? `近一年指數漲 ${di.toFixed(0)}%，外資持股比重也增加 ${dr.toFixed(2)} 個百分點，外資和指數同步看好。`
                   : di <= 0 && dr < 0 ? `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重也降 ${(-dr).toFixed(2)} 個百分點，外資在撤出。`
-                  : `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重卻增加 ${dr.toFixed(2)} 個百分點，外資逢低布局。`);
+                  : `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重卻增加 ${dr.toFixed(2)} 個百分點，外資逢低布局。`) + recent + tail;
               })(),
               summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（不含台積電 ${last.exTsmc.toFixed(2)}%）。資料自 ${rows[0].date} 起（${n} 筆）的區間為 ${rMin.toFixed(2)}%~${rMax.toFixed(2)}%，目前位於 ${pos}% 位置。${horizons.length ? '持股比重較 ' + horizons.join('、') + '。' : ''}`,
               chartTitle: '持股比重 vs 加權指數（半年～10 年，兩軸各自自動縮放）',
               legend: (<>
                 <span className="text-blue-400 whitespace-nowrap">— 左軸：持股比重</span>
                 <span className="text-red-400 whitespace-nowrap">- - 右軸：加權指數</span>
-                <span className="text-red-400 whitespace-nowrap">○ 金叉</span>
-                <span className="text-green-400 whitespace-nowrap">○ 死叉</span>
               </>),
               renderChart: () => <ForeignLongChart rows={rows} />,
             }}));
@@ -2938,7 +2916,10 @@
         // 台積電月營收（下車警示 Signal 2）
         const processRevenue = async () => {
           try {
-            const data = await fetchFinMind('TaiwanStockMonthRevenue', '2330', token, getPastDateString(18));
+            let data = null;
+            try { const r = await fetch('./data/revenue-2330.json'); if (r.ok) data = await r.json(); } catch (e) {}
+            const fresh = data && data.length >= 13 && Date.now() - Date.parse(data[data.length - 1].date) < 70 * 86400000;
+            if (!fresh) data = await fetchFinMind('TaiwanStockMonthRevenue', '2330', token, getPastDateString(18));
             const sorted = data.sort((a, b) => a.date.localeCompare(b.date));
             if (sorted.length < 13) return;
             const latest   = sorted[sorted.length - 1];
@@ -3082,9 +3063,9 @@
                     onClick={() => setShowTokenInput(!showTokenInput)}
                     className="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 bg-blue-900/30 rounded border border-blue-800 flex items-center gap-1 transition-colors"
                   >
-                    {token === DEFAULT_FINMIND_TOKEN
-                      ? <><Icons.CheckCircle2 size={12} className="text-green-400" /> 已啟用專屬 Token</>
-                      : <><Icons.Key size={12} /> 自訂 Token</>}
+                    {token
+                      ? <><Icons.CheckCircle2 size={12} className="text-green-400" /> 已設定自訂 Token</>
+                      : <><Icons.Key size={12} /> 每日快取模式</>}
                   </button>
                 </p>
                 {showTokenInput && (
@@ -3093,7 +3074,7 @@
                       type="password"
                       value={token}
                       onChange={e => saveToken(e.target.value)}
-                      placeholder="輸入 FinMind Token"
+                      placeholder="輸入自己的 FinMind Token（選填，只存在此瀏覽器）"
                       className="bg-gray-900 border border-gray-600 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-green-500 w-full sm:w-64 md:w-96"
                     />
                     <button onClick={fetchAllData} className="bg-green-600 hover:bg-green-500 px-4 py-1.5 rounded text-sm transition-colors text-white">

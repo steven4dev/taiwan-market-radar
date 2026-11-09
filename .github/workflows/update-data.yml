@@ -66,6 +66,12 @@ jobs:
 
           const today = new Date().toISOString().slice(0, 10);
 
+          function pastDate(days) {
+            const d = new Date();
+            d.setDate(d.getDate() - days);
+            return d.toISOString().slice(0, 10);
+          }
+
           async function fetchFinMind(dataset, dataId, startDate) {
             let url = `https://api.finmindtrade.com/api/v4/data?dataset=${dataset}&start_date=${startDate}`;
             if (dataId) url += `&data_id=${dataId}`;
@@ -188,6 +194,59 @@ jobs:
             console.log(`public-bank: ${merged.length} records, latest: ${merged.at(-1).date}`);
           }
 
+          // ── stock-XXXX.json（M2 權值股：台積電／台達電／聯發科／0050）──
+          async function updateStocks() {
+            for (const id of ['2330', '2308', '2454', '0050']) {
+              const path     = `data/stock-${id}.json`;
+              const existing = readJSON(path);
+              const latest   = latestDate(existing);
+              if (latest >= today) { console.log(`stock-${id}: up to date`); continue; }
+              const startDate = latest ? nextDay(latest) : pastDate(400);
+              const raw = await fetchFinMind('TaiwanStockPrice', id, startDate);
+              await sleep(500);
+              if (!raw.length) { console.log(`stock-${id}: no new data`); continue; }
+              const existDates = new Set(existing.map(r => r.date));
+              const merged = [
+                ...existing,
+                ...raw.filter(r => !existDates.has(r.date)).map(r => ({ date: r.date, close: r.close })),
+              ].sort((a, b) => a.date.localeCompare(b.date)).slice(-500);
+              writeJSON(path, merged);
+              console.log(`stock-${id}: ${merged.length} records, latest: ${merged.at(-1).date}`);
+            }
+          }
+
+          // ── margin.json（M4 融資融券餘額，張）────────────────────
+          async function updateMargin() {
+            const existing  = readJSON('data/margin.json');
+            const latest    = latestDate(existing);
+            if (latest >= today) { console.log('margin: up to date'); return; }
+            const startDate = latest ? nextDay(latest) : pastDate(200);
+            const raw       = await fetchFinMind('TaiwanStockTotalMarginPurchaseShortSale', '', startDate);
+            const byDate = {};
+            raw.forEach(d => {
+              if (!byDate[d.date]) byDate[d.date] = { date: d.date, margin: 0, short: 0 };
+              if (d.name === 'MarginPurchase') byDate[d.date].margin = Number(d.TodayBalance) || 0;
+              if (d.name === 'ShortSale')      byDate[d.date].short  = Number(d.TodayBalance) || 0;
+            });
+            const rows = Object.values(byDate).filter(d => d.margin > 0);
+            if (!rows.length) { console.log('margin: no new data'); return; }
+            const existDates = new Set(existing.map(r => r.date));
+            const merged = [...existing, ...rows.filter(r => !existDates.has(r.date))]
+              .sort((a, b) => a.date.localeCompare(b.date)).slice(-300);
+            writeJSON('data/margin.json', merged);
+            console.log(`margin: ${merged.length} records, latest: ${merged.at(-1).date}`);
+          }
+
+          // ── revenue-2330.json（台積電月營收，下車警示訊號 2）──────
+          async function updateRevenue() {
+            const raw = await fetchFinMind('TaiwanStockMonthRevenue', '2330', pastDate(760));
+            if (!raw.length) { console.log('revenue: no data'); return; }
+            const rows = raw.map(r => ({ date: r.date, revenue: r.revenue, revenue_year: r.revenue_year, revenue_month: r.revenue_month }))
+              .sort((a, b) => a.date.localeCompare(b.date));
+            writeJSON('data/revenue-2330.json', rows);
+            console.log(`revenue: ${rows.length} records, latest: ${rows.at(-1).date}`);
+          }
+
           // ── 執行 ──────────────────────────────────────────────────
           (async () => {
             let anyError = false;
@@ -198,7 +257,10 @@ jobs:
             await run(updateTaiex,         'taiex');        await sleep(500);
             await run(updateInstitutional, 'institutional');await sleep(500);
             await run(updateFutures,       'futures');      await sleep(500);
-            await run(updatePublicBank,    'public-bank');
+            await run(updatePublicBank,    'public-bank');  await sleep(500);
+            await run(updateStocks,        'stocks');       await sleep(500);
+            await run(updateMargin,        'margin');       await sleep(500);
+            await run(updateRevenue,       'revenue');
             if (anyError) { console.warn('⚠️ 部分更新失敗，其他資料已儲存'); process.exit(0); }
             else { console.log('✅ All updates complete'); }
           })();
