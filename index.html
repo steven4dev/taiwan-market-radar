@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261109.01';
+    const APP_VERSION = 'v 20261110.01';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -610,7 +610,7 @@
       const TOGGLES = [
         { label: 'EMA200 濾網', on: filter, set: setFilter, desc: '收盤在 EMA200 之上才買' },
         { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價跌 5% 出場' },
-        { label: '提早進場', on: early, set: v => { setEarly(v); if (!early) setStop(true); }, desc: '收盤首次跌破下軌就買（逆勢接刀，開啟時自動帶入停損）' },
+        { label: '提早進場', on: early, set: setEarly, desc: '收盤首次跌破下軌就買（逆勢接刀，可自行搭配停損）' },
       ];
 
       return (
