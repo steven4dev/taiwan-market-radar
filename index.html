@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.07';
+    const APP_VERSION = 'v 20261122.08';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -643,18 +643,19 @@
     //   賣出一律等 BB Short（或停損）。
     //   分批 lots（本雷達自加）：資金分 N 批，每批＝當下總資金的 1/N。N＝1 即一次全進全出（與原本相同）。
     //   N≥2 時：空手遇買進訊號買第 1 批；持有中再遇買進訊號，收盤須「低於目前平均成本」才加碼一批（最多 N 批）。
-    //   遇 BB Short 賣一批：同一輪中第一次賣出須「高於平均成本」，之後每次須「高於上次賣價」，否則不賣；全數賣完後重新計算。
+    //   遇 BB Short 賣一批（先進先出：買1 對 賣1、買2 對 賣2，以該批實際股數賣出、成本依平均成本扣除）：
+    //   同一輪中第一次賣出須「高於平均成本」，之後每次須「高於上次賣價」，否則不賣；全數賣完後重新計算。
     //   停損以平均成本計，觸發時全數出場。另記錄每日帳戶權益 eq（總資金 1 起算，含持有中），供分批時計算報酬。
     const runM14Strategy = (td, filter, stopPct = 0, entry = 'normal', lots = 1) => {
-      let cash = 1, units = [], cost = 0, lastSell = null, firstI = null, sellNo = 0;
-      let buyI = [], buyP = [];   // 每一批的買進日與買價，與 units 對應（賣出時取最後買的一批）
+      let cash = 1, units = [], cost = 0, lastSell = null, firstI = null, sellNo = 0, buyNo = 0;   // buyNo／sellNo：本輪第幾次買／賣，使 買N 對 賣N
+      let buyI = [], buyP = [];   // 每一批的買進日與買價，與 units 對應（賣出時取最早買的一批）
       const trades = [], marks = [], legs = [], eq = new Array(td.length).fill(1);   // legs：每一批的買→賣波段，供畫盈虧虛線
       const qty = () => units.reduce((a, u) => a + u, 0);
       const exitAll = (i, price, stop) => {
         const q = qty(), avg = cost / q;
         trades.push({ ei: firstI, xi: i, ret: price / avg - 1, stop, frac: 1 });
         buyI.forEach((bi, k) => legs.push({ ei: bi, xi: i, ret: price / buyP[k] - 1 }));
-        cash += q * price; units = []; cost = 0; lastSell = null; firstI = null; sellNo = 0; buyI = []; buyP = [];
+        cash += q * price; units = []; cost = 0; lastSell = null; firstI = null; sellNo = 0; buyNo = 0; buyI = []; buyP = [];
       };
       td.forEach((d, i) => {
         const mark = () => { eq[i] = cash + qty() * d.close; };
@@ -677,7 +678,7 @@
           const amt = Math.min(cash, (cash + qty() * d.close) / lots);
           if (amt > 1e-9) {
             if (!units.length) firstI = i;
-            units.push(amt / d.close); buyI.push(i); buyP.push(d.close); cash -= amt; cost += amt; exec = true; lot = units.length;
+            units.push(amt / d.close); buyI.push(i); buyP.push(d.close); cash -= amt; cost += amt; exec = true; lot = ++buyNo;
           }
         } else if (type === 'short' && units.length) {
           const avg = cost / qty();
@@ -686,10 +687,10 @@
             exec = true; lot = ++sellNo;
             if (units.length === 1) exitAll(i, d.close, false);
             else {
-              const u = qty() / units.length;
-              trades.push({ ei: firstI, xi: i, ret: d.close / avg - 1, frac: 1 / units.length });
-              cash += u * d.close; cost -= avg * u; units.pop(); lastSell = d.close;
-              legs.push({ ei: buyI.pop(), xi: i, ret: d.close / buyP.pop() - 1 });
+              const u = units.shift();   // 最早買進的一批，以其實際股數賣出
+              trades.push({ ei: firstI, xi: i, ret: d.close / avg - 1, frac: u / (u + qty()) });
+              cash += u * d.close; cost -= avg * u; lastSell = d.close;
+              legs.push({ ei: buyI.shift(), xi: i, ret: d.close / buyP.shift() - 1 });
             }
           }
         }
@@ -808,7 +809,7 @@
           </div>
           {/* 分批說明固定顯示，只以顏色區分，切換時版面不跳動 */}
           <p className={`mb-3 text-xs leading-relaxed ${lots > 1 ? 'text-blue-300' : 'text-gray-500'}`}>
-            分批：每批＝總資金 1/N；比平均成本低才加碼，第一次賣出須高於平均成本、之後須高於上次賣價才賣，每次賣一批。
+            分批：每批＝總資金 1/N；比平均成本低才加碼，第一次賣出須高於平均成本、之後須高於上次賣價才賣，每次賣最早買進的一批（買1 對 賣1）。
           </p>
           {expanded && (<div className="order-last">
           {head}
