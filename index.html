@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.01';
+    const APP_VERSION = 'v 20261122.02';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -200,6 +200,11 @@
 
     const SvgLineChart = ({ data, lines, height = 150, labels = [], fmt = v => v.toFixed(2), valueFmt }) => {
       const hv = useChartHover(data ? data.length : 0, 'line');
+      // 每條有名稱的折線都在右側標出最新值；呼叫端已用 key 手動標示的線不重複
+      const lastOf = key => { if (!data) return null; for (let i = data.length - 1; i >= 0; i--) if (data[i][key] != null) return data[i][key]; return null; };
+      const allLabels = [...labels, ...lines
+        .filter(l => l.name && !labels.some(x => x.key === l.key) && lastOf(l.key) != null)
+        .map(l => ({ key: l.key, value: lastOf(l.key), color: l.color, text: `${l.name} ${fmt(lastOf(l.key))}` }))];
       if (!data || data.length === 0) return null;
       let min = Infinity, max = -Infinity;
       data.forEach(d => lines.forEach(line => {
@@ -228,7 +233,7 @@
 
       return (
         <div className="relative w-full text-xs" style={{ height }}>
-          <div ref={hv.ref} {...hv.handlers} className="absolute top-0 left-0 bottom-0 cursor-crosshair" style={{ width: labels.length ? 'calc(100% - 92px)' : '100%' }}>
+          <div ref={hv.ref} {...hv.handlers} className="absolute top-0 left-0 bottom-0 cursor-crosshair" style={{ width: allLabels.length ? 'calc(100% - 92px)' : '100%' }}>
             <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
               {lines.map((line, i) => (
                 <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" strokeDasharray={line.dash} vectorEffect={line.dash ? 'non-scaling-stroke' : undefined} />
@@ -245,7 +250,7 @@
           </div>
           {(() => {
             // 右側數值標籤：依 y 由上而下排序，彼此至少相隔 14px，並限制在圖框內
-            const pts = labels.filter(l => l.value != null)
+            const pts = allLabels.filter(l => l.value != null)
               .map(l => ({ ...l, y: height - ((l.value - min) / (max - min)) * height }))
               .sort((a, b) => a.y - b.y);
             for (let k = 0; k < pts.length; k++) pts[k].y = Math.max(pts[k].y, k ? pts[k - 1].y + 14 : 7);
@@ -851,7 +856,7 @@
           </div>
           <SvgLineChart data={data} height={130}
             lines={LINES.map(([k, nm, c, w]) => ({ key: k, color: c, width: w, name: nm }))}
-            labels={LINES.map(([k, nm, c]) => ({ value: L[k], color: c, text: `${nm} ${f(L[k])}` }))}
+            labels={LINES.map(([k, nm, c]) => ({ key: k, value: L[k], color: c, text: `${nm} ${f(L[k])}` }))}
             fmt={x => f(x)} valueFmt={x => `${f(x)} 億`} />
         </div>
       );
@@ -2089,8 +2094,8 @@
               ...levels.map(l => ({ key: l.key, color: l.color, width: '1.5', dash: l.dash, name: l.name })),
             ]}
             labels={[
-              { value: chartData[chartData.length - 1].close, color: '#ffffff', text: `收盤 ${Math.round(chartData[chartData.length - 1].close).toLocaleString()}` },
-              ...levels.map(l => ({ value: l.value, color: l.color, text: `${l.name} ${Math.round(l.value).toLocaleString()}` })),
+              { key: 'close', value: chartData[chartData.length - 1].close, color: '#ffffff', text: `收盤 ${Math.round(chartData[chartData.length - 1].close).toLocaleString()}` },
+              ...levels.map(l => ({ key: l.key, value: l.value, color: l.color, text: `${l.name} ${Math.round(l.value).toLocaleString()}` })),
             ]}
             fmt={v => Math.round(v).toLocaleString()}
             height={150}
@@ -2504,8 +2509,8 @@
               </>),
               renderChart: () => (
                 <div className="flex flex-col gap-3">
-                  <SvgLineChart data={series} lines={[{key:'margin', color:'#c084fc', width:'2'}]} height={70} fmt={v => `${Math.round(v / 1e4).toLocaleString()} 萬張`} />
-                  <SvgLineChart data={series} lines={[{key:'ratio',  color:'#fb923c', width:'2'}]} height={50} fmt={v => `${v.toFixed(2)}%`} />
+                  <SvgLineChart data={series} lines={[{key:'margin', color:'#c084fc', width:'2', name:'融資'}]} height={70} fmt={v => `${Math.round(v / 1e4).toLocaleString()} 萬張`} />
+                  <SvgLineChart data={series} lines={[{key:'ratio',  color:'#fb923c', width:'2', name:'券資比'}]} height={50} fmt={v => `${v.toFixed(2)}%`} />
                 </div>
               ),
             }}));
@@ -2585,8 +2590,6 @@
                 <SvgLineChart
                   data={td.slice(-120)}
                   lines={[{key:'close',color:'#ffffff',width:'2',name:'收盤'},{key:'sma60',color:'#facc15',width:'1.5',name:'季線'},{key:'sma120',color:'#c084fc',width:'1.5',name:'半年線'},{key:'sma240',color:'#38bdf8',width:'1.5',name:'年線'}]}
-                  labels={[['close','收盤','#ffffff'],['sma60','季線','#facc15'],['sma120','半年線','#c084fc'],['sma240','年線','#38bdf8']]
-                    .filter(([k]) => last[k] != null).map(([k, nm, c]) => ({ value: last[k], color: c, text: `${nm} ${Math.round(last[k]).toLocaleString()}` }))}
                   fmt={v => Math.round(v).toLocaleString()}
                 />
               ),
@@ -2637,7 +2640,7 @@
               plain: `費城半導體指數是全球半導體股的風向球，台股有很大比重是半導體。近 5 日${rate > 0 ? '上漲' : '下跌'} ${Math.abs(rate).toFixed(1)}%，`
                 + (rate > 2 ? '美國半導體股走強，台股電子股通常跟著受惠。' : rate < -3 ? '美國半導體股明顯下跌，台股電子股容易被拖累。' : '變化不大，對台股影響有限。'),
               chartTitle: `${displayName} 走勢（近 60 日）`,
-              renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2'}]} />,
+              renderChart: () => <SvgLineChart data={soxData} lines={[{key:'close',color:'#38bdf8',width:'2',name:'收盤'}]} fmt={v => Math.round(v).toLocaleString()} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M7:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M7:false})); }
