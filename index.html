@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.08';
+    const APP_VERSION = 'v 20261122.09';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -555,20 +555,23 @@
 
         const trades = raw.filter(t => t.i0 >= WARM && t.i1 >= viewStart).map(t => {
           const p0 = td[t.i0].close, p1 = td[t.i1].close;
+          // 區間開始時已持有的波段：視同在區間首日以收盤價買進，只計區間內報酬（與買進持有同一起點）
           let a = t.i0 - viewStart, pa = p0, clipped = false;
-          if (a < 0) { pa = p0 + (p1 - p0) * (-a) / (t.i1 - t.i0); a = 0; clipped = true; }
-          return { a, b: t.i1 - viewStart, pa, pb: p1, p0, p1, ret: (p1 / p0 - 1) * 100,
+          if (a < 0) { pa = td[viewStart].close; a = 0; clipped = true; }
+          return { a, b: t.i1 - viewStart, pa, pb: p1, p0, p1, ret: (p1 / pa - 1) * 100,
                    open: t.open, clipped, d0: td[t.i0].date, d1: td[t.i1].date };
         });
 
         const rets = trades.filter(t => !t.open).map(t => t.ret);
+        const openT = trades.find(t => t.open);
         const wins = rets.filter(r => r > 0), losses = rets.filter(r => r <= 0);
         const avg = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
         const stats = rets.length ? {
           count: rets.length, wins: wins.length, losses: losses.length,
           winRate: wins.length / rets.length * 100,
           avgWin: avg(wins), avgLoss: avg(losses),
-          total: (rets.reduce((e, r) => e * (1 + r / 100), 1) - 1) * 100,
+          // 區間內帳戶報酬：已平倉波段依序複利 × 持有中部位的未實現損益
+          total: (rets.reduce((e, r) => e * (1 + r / 100), 1) * (openT ? 1 + openT.ret / 100 : 1) - 1) * 100,
           best: Math.max(...rets), worst: Math.min(...rets),
         } : null;
         const bh = (td[n - 1].close / td[viewStart].close - 1) * 100;   // 區間首日收盤買進、持有到最新一日
@@ -598,7 +601,7 @@
               {tile('勝率', `${stats.winRate.toFixed(0)}%`,
                 stats.avgWin != null && stats.avgLoss != null && stats.avgLoss < 0
                   ? `盈虧比 ${(stats.avgWin / Math.abs(stats.avgLoss)).toFixed(2)}` : '盈虧比 —')}
-              {tile('累計報酬', <span className={rc(stats.total)}>{sg(stats.total)}</span>, '各波段依序複利', bh != null && stats.total > bh)}
+              {tile('累計報酬', <span className={rc(stats.total)}>{sg(stats.total)}</span>, '區間內（含持有中）', bh != null && stats.total > bh)}
               {tile('買進持有', <span className={rc(bh)}>{sg(bh)}</span>, '區間首日買進抱到最新', bh != null && bh > stats.total)}
               {tile('平均每筆',
                 <span className="text-sm"><span className={rc(stats.avgWin)}>{sg(stats.avgWin)}</span>{' / '}<span className={rc(stats.avgLoss)}>{sg(stats.avgLoss)}</span></span>,
@@ -612,7 +615,7 @@
           )}
           <p className="text-xs text-gray-400 mb-3">
             {openTrade
-              ? <>目前持有中：▲ {openTrade.d0} 進場，未實現 <span className={rc(openTrade.ret)}>{sg(openTrade.ret)}</span>（不計入上列統計）。</>
+              ? <>目前持有中：▲ {openTrade.d0} 進場，區間內未實現 <span className={rc(openTrade.ret)}>{sg(openTrade.ret)}</span>（已計入累計報酬，不計入勝率等逐筆統計）。</>
               : '目前空手。'}
           </p>
           {expanded && (
@@ -749,7 +752,9 @@
         return path;
       };
       const marks = res.marks.filter(m => m.i >= base);
-      const trades = res.trades.filter(t => t.xi >= base);
+      // 區間開始時已持有的部位，逐筆報酬改從區間首日收盤起算（帳戶報酬本來就從區間起點計）
+      const trades = res.trades.filter(t => t.xi >= base)
+        .map(t => (t.ei != null && t.ei < base ? { ...t, ret: td[t.xi].close / td[base].close - 1 } : t));
       const showLbl = marks.filter(m => m.exec).length <= 24;
       const wins = trades.filter(t => t.ret > 0);
       // 帳戶報酬：以總資金計（含持有中），三種模式口徑一致
@@ -1093,17 +1098,21 @@
       if (hold != null && lastPx != null) trades.push({ i0: hold, i1: t.length - 1, open: true, p0: entry, p1: lastPx, ret: (lastPx / entry - 1) * 100 });
       return { trades, eq };
     };
-    // 區間統計：賣出日落在 [off, 末] 的已平倉波段；買進持有自區間內第一個有價格的列起算；最大回撤取區間內權益曲線。
+    // 區間統計（策略與買進持有同一起點）：自區間內第一個有價格的列 f 起算。
+    //   區間開始時已持有的波段，視同在 f 以收盤價買進，只計區間內報酬；累計報酬＝區間內帳戶報酬（含持有中）。
+    //   賣出日落在區間內的已平倉波段計入勝率；最大回撤取區間內權益曲線。
     const windowStatsTiming = (sim, px, off) => {
-      const closed = sim.trades.filter(x => !x.open && x.i1 >= off);
+      let f = -1;
+      for (let i = off; i < px.length; i++) { if (px[i] != null) { f = i; break; } }
+      const first = f >= 0 ? px[f] : null;
+      const closed = sim.trades.filter(x => !x.open && x.i1 >= off)
+        .map(x => (x.i0 < off && first != null ? { ...x, ret: (x.p1 / first - 1) * 100 } : x));
       const n = closed.length, wins = closed.filter(x => x.ret > 0).length;
-      const total = (closed.reduce((e, x) => e * (1 + x.ret / 100), 1) - 1) * 100;
-      let first = null;
-      for (let i = off; i < px.length; i++) { if (px[i] != null) { first = px[i]; break; } }
+      const total = f >= 0 ? (sim.eq[sim.eq.length - 1] / sim.eq[f] - 1) * 100 : 0;
       const lastP = px[px.length - 1];
       const bh = first != null && lastP != null ? (lastP / first - 1) * 100 : null;
-      let peak = sim.eq[off], dd = 0;
-      for (let i = off; i < sim.eq.length; i++) { peak = Math.max(peak, sim.eq[i]); dd = Math.min(dd, sim.eq[i] / peak - 1); }
+      let peak = sim.eq[Math.max(off, f)], dd = 0;
+      for (let i = Math.max(off, f); i < sim.eq.length; i++) { peak = Math.max(peak, sim.eq[i]); dd = Math.min(dd, sim.eq[i] / peak - 1); }
       dd *= 100;
       return { n, wins, winRate: n ? wins / n * 100 : null, total, bh, excess: bh != null ? total - bh : null, dd, ratio: dd < 0 ? total / Math.abs(dd) : null };
     };
@@ -1314,7 +1323,13 @@
         else if (a >= 0 && b < 0) crosses.push({ i, gold: false });
       }
       const off = withMa.length - n;
-      const vt = trades.filter(x => x.i1 >= off).map(x => ({ ...x, a: Math.max(0, x.i0 - off), b: x.i1 - off, clipped: x.i0 < off }));
+      // 區間開始時已持有的波段：視同在區間第一個有價格的日子以收盤價買進，只計區間內報酬（與買進持有同一起點）
+      const firstPx = view.find(d => d.price != null);
+      const vt = trades.filter(x => x.i1 >= off).map(x => {
+        const clipped = x.i0 < off;
+        const ret = clipped && firstPx ? (x.p1 / firstPx.price - 1) * 100 : x.ret;
+        return { ...x, a: Math.max(0, x.i0 - off), b: x.i1 - off, clipped, ret, fullRet: x.ret };
+      });
       const closed = vt.filter(x => !x.open);
       const openT = vt.find(x => x.open) || null;
       const rets = closed.map(x => x.ret);
@@ -1324,10 +1339,10 @@
         count: rets.length, wins: winsA.length, losses: lossA.length,
         winRate: winsA.length / rets.length * 100,
         avgWin: avgA(winsA), avgLoss: avgA(lossA),
-        total: (rets.reduce((e, r) => e * (1 + r / 100), 1) - 1) * 100,
+        // 區間內帳戶報酬：已平倉波段依序複利 × 持有中部位的未實現損益
+        total: (rets.reduce((e, r) => e * (1 + r / 100), 1) * (openT ? 1 + openT.ret / 100 : 1) - 1) * 100,
         best: Math.max(...rets), worst: Math.min(...rets),
       } : null;
-      const firstPx = view.find(d => d.price != null);
       const bh = (firstPx && last.price != null) ? (last.price / firstPx.price - 1) * 100 : null;
       const fmtP = v => (v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2));
       const adjNote = asset === 'TAIEX' ? '收盤價' : '還原收盤價（含股息）';
@@ -1404,7 +1419,7 @@
               {tile('勝率', `${st.winRate.toFixed(0)}%`,
                 st.avgWin != null && st.avgLoss != null && st.avgLoss < 0
                   ? `盈虧比 ${(st.avgWin / Math.abs(st.avgLoss)).toFixed(2)}` : '盈虧比 —')}
-              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>, '各波段依序複利', bh != null && st.total > bh)}
+              {tile('累計報酬', <span className={rcl(st.total)}>{sgp(st.total)}</span>, '區間內（含持有中）', bh != null && st.total > bh)}
               {tile('買進持有', <span className={rcl(bh)}>{sgp(bh)}</span>, '區間首日買進抱到最新', bh != null && bh > st.total)}
               {tile('平均每筆',
                 <span className="text-sm"><span className={rcl(st.avgWin)}>{sgp(st.avgWin)}</span>{' / '}<span className={rcl(st.avgLoss)}>{sgp(st.avgLoss)}</span></span>,
