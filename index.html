@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.02';
+    const APP_VERSION = 'v 20261122.03';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -641,30 +641,61 @@
     //   'early'  提早＝收盤「第一次跌破下軌」當天就買，不等穿回通道內；
     //   'auto'   自動＝當天收盤在 EMA200 之上（長線多頭）用提早進場，之下（長線空頭）用正常進場。
     //   賣出一律等 BB Short（或停損）。
-    const runM14Strategy = (td, filter, stopPct = 0, entry = 'normal') => {
-      let hold = null;
-      const trades = [], marks = [];
+    //   分批 lots（本雷達自加）：資金分 N 批，每批＝當下總資金的 1/N。N＝1 即一次全進全出（與原本相同）。
+    //   N≥2 時：空手遇買進訊號買第 1 批；持有中再遇買進訊號，收盤須「低於目前平均成本」才加碼一批（最多 N 批）。
+    //   遇 BB Short 賣一批：同一輪中第一次賣出須「高於平均成本」，之後每次須「高於上次賣價」，否則不賣；全數賣完後重新計算。
+    //   停損以平均成本計，觸發時全數出場。另記錄每日帳戶權益 eq（總資金 1 起算，含持有中），供分批時計算報酬。
+    const runM14Strategy = (td, filter, stopPct = 0, entry = 'normal', lots = 1) => {
+      let cash = 1, units = [], cost = 0, lastSell = null, firstI = null, sellNo = 0;
+      const trades = [], marks = [], eq = new Array(td.length).fill(1);
+      const qty = () => units.reduce((a, u) => a + u, 0);
+      const exitAll = (i, price, stop) => {
+        const q = qty(), avg = cost / q;
+        trades.push({ ei: firstI, xi: i, ret: price / avg - 1, stop, frac: 1 });
+        cash += q * price; units = []; cost = 0; lastSell = null; firstI = null; sellNo = 0;
+      };
       td.forEach((d, i) => {
-        if (hold && stopPct > 0 && d.close / hold.price - 1 <= -stopPct) {
-          trades.push({ ei: hold.i, xi: i, ret: d.close / hold.price - 1, stop: true });
+        const mark = () => { eq[i] = cash + qty() * d.close; };
+        if (units.length && stopPct > 0 && d.close / (cost / qty()) - 1 <= -stopPct) {
+          exitAll(i, d.close, true);
           marks.push({ i, type: 'stop', exec: true });
-          hold = null;
-          return;
+          return mark();
         }
-        if (i === 0 || d.bbL == null) return;
+        if (i === 0 || d.bbL == null) return mark();
         const p = td[i - 1];
-        if (p.bbL == null) return;
+        if (p.bbL == null) return mark();
         let type = null;
         const early = entry === 'early' || (entry === 'auto' && d.ema200 != null && d.close >= d.ema200);
         if (early ? (p.close >= p.bbL && d.close < d.bbL) : (p.close <= p.bbL && d.close > d.bbL)) type = 'long';
         else if (p.close >= p.bbU && d.close < d.bbU) type = 'short';
-        if (!type) return;
-        let exec = false;
-        if (type === 'long' && !hold && (!filter || d.close >= d.ema200)) { hold = { i, price: d.close }; exec = true; }
-        else if (type === 'short' && hold) { trades.push({ ei: hold.i, xi: i, ret: d.close / hold.price - 1 }); hold = null; exec = true; }
-        marks.push({ i, type, exec, early: early && type === 'long' });
+        if (!type) return mark();
+        let exec = false, lot = 0;
+        if (type === 'long' && (!filter || d.close >= d.ema200)
+            && (!units.length || (units.length < lots && d.close < cost / qty()))) {
+          const amt = Math.min(cash, (cash + qty() * d.close) / lots);
+          if (amt > 1e-9) {
+            if (!units.length) firstI = i;
+            units.push(amt / d.close); cash -= amt; cost += amt; exec = true; lot = units.length;
+          }
+        } else if (type === 'short' && units.length) {
+          const avg = cost / qty();
+          const ok = lots === 1 || (lastSell == null ? d.close > avg : d.close > lastSell);
+          if (ok) {
+            exec = true; lot = ++sellNo;
+            if (units.length === 1) exitAll(i, d.close, false);
+            else {
+              const u = qty() / units.length;
+              trades.push({ ei: firstI, xi: i, ret: d.close / avg - 1, frac: 1 / units.length });
+              cash += u * d.close; cost -= avg * u; units.pop(); lastSell = d.close;
+            }
+          }
+        }
+        marks.push({ i, type, exec, lot, early: early && type === 'long' });
+        mark();
       });
-      return { marks, trades, hold };
+      const q = qty();
+      const hold = units.length ? { i: firstI, price: cost / q, lots: units.length } : null;
+      return { marks, trades, hold, eq };
     };
 
     // M14 面板：收盤／EMA50／EMA200／布林通道＋BB Long／BB Short 標記與實際進出場
@@ -674,8 +705,9 @@
       const [filter, setFilter] = useState(false);
       const [stop, setStop] = useState(false);
       const [entry, setEntry] = useState('normal');   // normal／early／auto：提早與自動互斥，都不選＝正常進場
+      const [lots, setLots] = useState(1);            // 1＝一般（全進全出）；2／3＝進 N 出 N
       const STOP_PCT = 0.05;
-      const res = useMemo(() => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry), [td, filter, stop, entry]);
+      const res = useMemo(() => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry, lots), [td, filter, stop, entry, lots]);
       const cut = cutoffDate(td[td.length - 1].date, years);
       const base = Math.max(0, td.findIndex(d => d.date >= cut));
       const view = td.slice(base), n = view.length;
@@ -699,7 +731,11 @@
       const trades = res.trades.filter(t => t.xi >= base);
       const showLbl = marks.filter(m => m.exec).length <= 24;
       const wins = trades.filter(t => t.ret > 0);
-      const cum = trades.reduce((a, t) => a * (1 + t.ret), 1) - 1;
+      const cum = lots === 1 ? trades.reduce((a, t) => a * (1 + t.ret), 1) - 1
+        : res.eq[td.length - 1] / res.eq[Math.max(0, base - 1)] - 1;      // 分批：以總資金計（含持有中）
+      const LOT_OPTS = [[1, '一般'], [2, '進 2 出 2'], [3, '進 3 出 3']];
+      const lotLbl = m => (m.type === 'stop' ? '停損' : lots === 1 ? (m.early ? '提早買' : `BB ${m.type === 'long' ? 'Long' : 'Short'}`)
+        : `${m.type === 'long' ? (m.early ? '提早買' : '買') : '賣'}${m.lot}`);
       const avgW = wins.length ? wins.reduce((s, t) => s + t.ret, 0) / wins.length * 100 : 0;
       const losses = trades.filter(t => t.ret <= 0);
       const avgL = losses.length ? losses.reduce((s, t) => s + t.ret, 0) / losses.length * 100 : 0;
@@ -708,7 +744,7 @@
       const tickIdx = Array.from({ length: 5 }, (_, k) => Math.round(k * (n - 1) / 4));   // 手機只顯示頭、中、尾
       const TOGGLES = [
         { label: 'EMA200 濾網', on: filter, set: setFilter, desc: '收盤在 EMA200 之上才買' },
-        { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價跌 5% 出場' },
+        { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價（分批時為平均成本）跌 5% 全數出場' },
         { label: '提早進場', on: entry === 'early', set: () => setEntry(e => (e === 'early' ? 'normal' : 'early')), desc: '收盤首次跌破下軌就買（逆勢接刀，可自行搭配停損）' },
         { label: '自動進場', on: entry === 'auto', set: () => setEntry(e => (e === 'auto' ? 'normal' : 'auto')), desc: 'EMA200 之上（多頭）提早買、之下（空頭）等穿回下軌才買；與提早進場二選一' },
       ];
@@ -734,6 +770,19 @@
               </span>
             ))}
           </p>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs text-gray-500 flex-shrink-0">分批</span>
+            <div className="flex gap-1">
+              {LOT_OPTS.map(([v, l]) => (
+                <button key={v} onClick={() => setLots(v)}
+                  className={`px-3 py-1 rounded-md text-xs border whitespace-nowrap transition-colors ${lots === v ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>{l}</button>
+              ))}
+            </div>
+          </div>
+          {/* 分批說明固定顯示，只以顏色區分，切換時版面不跳動 */}
+          <p className={`mb-3 text-xs leading-relaxed ${lots > 1 ? 'text-blue-300' : 'text-gray-500'}`}>
+            分批：每批＝總資金 1/N；比平均成本低才加碼，第一次賣出須高於平均成本、之後須高於上次賣價才賣，每次賣一批。
+          </p>
           {expanded && (<div className="order-last">
           {head}
           <div className="flex">
@@ -750,7 +799,7 @@
                   const d = view[hv.idx], mk = res.marks.find(m => m.i === base + hv.idx);
                   const f0 = v => (v == null ? '—' : Math.round(v).toLocaleString());
                   return <>
-                    <div className="text-gray-300 font-bold">{d.date}{mk ? `　${mk.type === 'stop' ? '停損' : mk.early ? '提早買' : mk.type === 'long' ? 'BB Long' : 'BB Short'}${mk.exec ? '' : '（未成交）'}` : ''}</div>
+                    <div className="text-gray-300 font-bold">{d.date}{mk ? `　${mk.exec ? lotLbl(mk) : `${mk.early ? '提早買' : `BB ${mk.type === 'long' ? 'Long' : 'Short'}`}（未成交）`}` : ''}</div>
                     <TipRow color="#e5e7eb" name="收盤" value={f0(d.close)} />
                     <TipRow color="#f87171" name="EMA50" value={f0(d.ema50)} />
                     <TipRow color="#22c55e" name="EMA200" value={f0(d.ema200)} />
@@ -765,7 +814,7 @@
                 <path d={mk('ema50')} fill="none" stroke="#f87171" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
                 <path d={mk('ema200')} fill="none" stroke="#22c55e" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
                 <path d={mk('close')} fill="none" stroke="#e5e7eb" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-                {trades.filter(t => t.ei >= base).map((t, k) => (
+                {lots === 1 && trades.filter(t => t.ei >= base).map((t, k) => (
                   <line key={k} x1={fx(t.ei) * W} y1={fy(td[t.ei].close) * H} x2={fx(t.xi) * W} y2={fy(td[t.xi].close) * H}
                     stroke={t.ret > 0 ? '#ef4444' : '#22c55e'} strokeWidth="1.5" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" />
                 ))}
@@ -774,13 +823,13 @@
                 const isL = m.type === 'long';
                 const col = isL ? '#ef4444' : '#22c55e';
                 return (
-                  <div key={m.i} className="absolute pointer-events-none" title={m.type === 'stop' ? `${td[m.i].date} 停損出場` : `${td[m.i].date} ${m.early ? '提早進場' : `BB ${isL ? 'Long' : 'Short'}`}${m.exec ? (isL ? '（買進）' : '（賣出）') : '（未成交）'}`}
+                  <div key={m.i} className="absolute pointer-events-none" title={m.type === 'stop' ? `${td[m.i].date} 停損出場` : `${td[m.i].date} ${m.exec ? lotLbl(m) : `${m.early ? '提早進場' : `BB ${isL ? 'Long' : 'Short'}`}（未成交）`}`}
                     style={{ left: `${fx(m.i) * 100}%`, top: `${fy(td[m.i].close) * 100}%`, transform: 'translate(-50%,-50%)', opacity: m.exec ? 1 : 0.45 }}>
                     <div style={{ width: 11, height: 11, borderRadius: '50%', background: m.exec ? col : '#111827', border: `2.5px solid ${col}` }} />
                     {showLbl && m.exec && (
                       <span className="absolute left-1/2 text-[10px] font-bold rounded px-1 whitespace-nowrap"
                         style={{ background: m.type === 'stop' ? '#fb923c' : '#facc15', color: '#111827', transform: 'translateX(-50%)', ...(isL ? { top: 14 } : { bottom: 14 }) }}>
-                        {m.type === 'stop' ? '停損' : m.early ? '提早買' : `BB ${isL ? 'Long' : 'Short'}`}
+                        {lotLbl(m)}
                       </span>
                     )}
                   </div>
@@ -797,13 +846,15 @@
           </div>
           </div>)}
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">已平倉</div><div className="text-white font-bold">{trades.length} 次（獲利 {wins.length}）</div></div>
+            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">{lots === 1 ? '已平倉' : '已賣出'}</div><div className="text-white font-bold">{trades.length} {lots === 1 ? '次' : '批'}（獲利 {wins.length}）</div></div>
             <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">勝率</div><div className="text-white font-bold">{trades.length ? Math.round(wins.length / trades.length * 100) + '%' : '—'}</div></div>
             <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">平均獲利 / 虧損</div><div className="font-bold"><span className="text-red-400">{sg(avgW)}</span> / <span className="text-green-400">{sg(avgL)}</span></div></div>
-            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">累計報酬（複利）</div><div className={`font-bold ${cum >= 0 ? 'text-red-400' : 'text-green-400'}`}>{trades.length ? sg(cum * 100) : '—'}</div></div>
+            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">{lots === 1 ? '累計報酬（複利）' : '帳戶報酬（總資金）'}</div><div className={`font-bold ${cum >= 0 ? 'text-red-400' : 'text-green-400'}`}>{trades.length || lots > 1 ? sg(cum * 100) : '—'}</div></div>
           </div>
           <p className="mt-2 text-xs text-gray-500">
-            {res.hold ? `目前持有中（${td[res.hold.i].date} 以 ${td[res.hold.i].close.toFixed(0)} 買進，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}）。` : '目前空手。'}
+            {!res.hold ? '目前空手。' : lots === 1
+              ? `目前持有中（${td[res.hold.i].date} 以 ${td[res.hold.i].close.toFixed(0)} 買進，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}）。`
+              : `目前持有 ${res.hold.lots}／${lots} 批（${td[res.hold.i].date} 起），平均成本 ${res.hold.price.toFixed(0)}，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}。`}
             {' '}規則：BB(22, 2) 收盤自下軌之下回到之上＝BB Long、自上軌之上回到之下＝BB Short（與 TradingView 該指標在 TXF1! 日線的訊號逐根比對相符；本雷達用加權指數，個別日期可能與期貨差一兩天）；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有遇 Long，或被濾網擋下）。以收盤價計，未含手續費與證交稅，僅供學習參考。
           </p>
         </div>
