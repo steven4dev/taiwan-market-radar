@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.03';
+    const APP_VERSION = 'v 20261122.04';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -707,7 +707,9 @@
       const [entry, setEntry] = useState('normal');   // normal／early／auto：提早與自動互斥，都不選＝正常進場
       const [lots, setLots] = useState(1);            // 1＝一般（全進全出）；2／3＝進 N 出 N
       const STOP_PCT = 0.05;
-      const res = useMemo(() => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry, lots), [td, filter, stop, entry, lots]);
+      // 三種分批模式同時計算，供冠亞季軍排名；圖表與統計顯示所選模式
+      const resAll = useMemo(() => [1, 2, 3].map(N => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry, N)), [td, filter, stop, entry]);
+      const res = resAll[lots - 1];
       const cut = cutoffDate(td[td.length - 1].date, years);
       const base = Math.max(0, td.findIndex(d => d.date >= cut));
       const view = td.slice(base), n = view.length;
@@ -731,9 +733,15 @@
       const trades = res.trades.filter(t => t.xi >= base);
       const showLbl = marks.filter(m => m.exec).length <= 24;
       const wins = trades.filter(t => t.ret > 0);
-      const cum = lots === 1 ? trades.reduce((a, t) => a * (1 + t.ret), 1) - 1
-        : res.eq[td.length - 1] / res.eq[Math.max(0, base - 1)] - 1;      // 分批：以總資金計（含持有中）
-      const LOT_OPTS = [[1, '一般'], [2, '進 2 出 2'], [3, '進 3 出 3']];
+      // 帳戶報酬：以總資金計（含持有中），三種模式口徑一致
+      const acct = r => r.eq[td.length - 1] / r.eq[Math.max(0, base - 1)] - 1;
+      const cum = acct(res);
+      const LOT_OPTS = [[1, '一般'], [2, '進2出2'], [3, '進3出3']];
+      // 冠亞季軍：依所選區間的帳戶報酬排名（同值並列）；三種模式在區間內都沒有成交時不顯示
+      const rets = resAll.map(acct);
+      const anyTrade = resAll.some(r => r.marks.some(m => m.exec && m.i >= base));
+      const rankOf = k => 1 + rets.filter(v => v > rets[k] + 1e-9).length;
+      const LOT_MEDALS = ['🏆', '🥈', '🥉'];
       const lotLbl = m => (m.type === 'stop' ? '停損' : lots === 1 ? (m.early ? '提早買' : `BB ${m.type === 'long' ? 'Long' : 'Short'}`)
         : `${m.type === 'long' ? (m.early ? '提早買' : '買') : '賣'}${m.lot}`);
       const avgW = wins.length ? wins.reduce((s, t) => s + t.ret, 0) / wins.length * 100 : 0;
@@ -770,14 +778,15 @@
               </span>
             ))}
           </p>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs text-gray-500 flex-shrink-0">分批</span>
-            <div className="flex gap-1">
-              {LOT_OPTS.map(([v, l]) => (
-                <button key={v} onClick={() => setLots(v)}
-                  className={`px-3 py-1 rounded-md text-xs border whitespace-nowrap transition-colors ${lots === v ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>{l}</button>
-              ))}
-            </div>
+          <p className="text-xs text-gray-500 mb-1">分批（獎牌＝所選區間帳戶報酬排名）</p>
+          <div className="grid grid-cols-3 gap-1 mb-1">
+            {LOT_OPTS.map(([v, l], k) => (
+              <button key={v} onClick={() => setLots(v)}
+                className={`px-1 py-1 rounded-md text-xs border text-center leading-tight transition-colors ${lots === v ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                <div className="whitespace-nowrap">{anyTrade ? LOT_MEDALS[rankOf(k) - 1] + ' ' : ''}{l}</div>
+                <div className={`whitespace-nowrap text-[11px] ${rets[k] >= 0 ? 'text-red-300' : 'text-green-300'}`}>{`${rets[k] >= 0 ? '+' : ''}${(rets[k] * 100).toFixed(1)}%`}</div>
+              </button>
+            ))}
           </div>
           {/* 分批說明固定顯示，只以顏色區分，切換時版面不跳動 */}
           <p className={`mb-3 text-xs leading-relaxed ${lots > 1 ? 'text-blue-300' : 'text-gray-500'}`}>
@@ -849,7 +858,7 @@
             <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">{lots === 1 ? '已平倉' : '已賣出'}</div><div className="text-white font-bold">{trades.length} {lots === 1 ? '次' : '批'}（獲利 {wins.length}）</div></div>
             <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">勝率</div><div className="text-white font-bold">{trades.length ? Math.round(wins.length / trades.length * 100) + '%' : '—'}</div></div>
             <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">平均獲利 / 虧損</div><div className="font-bold"><span className="text-red-400">{sg(avgW)}</span> / <span className="text-green-400">{sg(avgL)}</span></div></div>
-            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">{lots === 1 ? '累計報酬（複利）' : '帳戶報酬（總資金）'}</div><div className={`font-bold ${cum >= 0 ? 'text-red-400' : 'text-green-400'}`}>{trades.length || lots > 1 ? sg(cum * 100) : '—'}</div></div>
+            <div className="bg-gray-900 rounded-lg p-2 border border-gray-700"><div className="text-gray-500">帳戶報酬（總資金）</div><div className={`font-bold ${cum >= 0 ? 'text-red-400' : 'text-green-400'}`}>{sg(cum * 100)}</div></div>
           </div>
           <p className="mt-2 text-xs text-gray-500">
             {!res.hold ? '目前空手。' : lots === 1
