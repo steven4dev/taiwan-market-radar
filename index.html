@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.05';
+    const APP_VERSION = 'v 20261122.06';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -939,7 +939,7 @@
 
     const ForeignLongChart = ({ rows, inst }) => {
       const { useMemo, useRef, useCallback } = React;
-      const [years, setYears] = useState(5);
+      const [years, setYears] = usePersist('m11-years', 5, x => [0.5, 1, 2, 3, 5, 10].includes(x));   // 記住上次選擇
       const [hov, setHov] = useState(null);
       const boxRef = useRef(null);
       const DAILY_FROM = '2021-11-01';          // 此日期之前的資料為每週一筆
@@ -1131,7 +1131,7 @@
         ['006208', '006208 富邦台50', '006208'], ['00631L', '00631L 台灣50正2', '00631L'], ['00685L', '00685L 加權正2', '00685L'],
         ['2308', '2308 台達電', '2308 台達電'], ['2317', '2317 鴻海', '2317 鴻海'], ['2330', '2330 台積電', '2330 台積電'], ['2454', '2454 聯發科', '2454 聯發科'],
         ['8299', '8299 群聯', '8299 群聯']];
-      const [asset, setAsset] = useState('TAIEX');
+      const [asset, setAsset] = usePersist('m13-asset', 'TAIEX', x => ASSETS.some(a => a[0] === x));   // 記住上次選的買進標的
       const [store, setStore] = useState({});            // code → {rows:[[date,o,h,l,c]]} | 'loading' | 'error'
       useEffect(() => {
         ASSETS.forEach(([code]) => {
@@ -1157,7 +1157,7 @@
       }, [rows, years]);
       const DAY = 864e5;
       const PRESETS = [[30, 90], [20, 60], [60, 180]];
-      const [pi, setPi] = useState(0);
+      const [pi, setPi] = usePersist('m13-preset', 0, x => [0, 1, 2].includes(x));                      // 記住上次選的均線參數
       const [MA_S, MA_L] = PRESETS[pi];
       const withMa = useMemo(() => {
         const t = rows.map(d => Date.parse(d.date));
@@ -2153,7 +2153,7 @@
     const M1ZoomChart = ({ taiexData, levels }) => {
       const { useState } = React;
       const STEPS = [30, 60, 90, 120, 180, 250];
-      const [stepIdx, setStepIdx] = useState(3); // 預設 120 天
+      const [stepIdx, setStepIdx] = usePersist('m1-zoom', 3, x => Number.isInteger(x) && x >= 0 && x < STEPS.length); // 預設 120 天，記住上次選擇
       const days = STEPS[stepIdx];
       const withSMA = calculateSMA(taiexData.map(d => ({ date: d.date, close: d.close })), 60);
       const byDate = Object.fromEntries(withSMA.map(d => [d.date, d.sma60]));
