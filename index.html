@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261110.01';
+    const APP_VERSION = 'v 20261122.01';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -96,9 +96,9 @@
       M7: { weight: 0.06, title: '外部環境',     icon: 'Globe' },
       M8: { weight: 0.08, title: '公股銀行動向', icon: 'Building2' },
       M9: { weight: 0.12, title: '夜盤動向',     icon: 'Moon' },
-      M10: { weight: 0.06, title: '外資持股比重', icon: 'Flag' },
-      M11: { weight: 0.06, title: 'MACD+KD 短線時機', icon: 'Crosshair', wideWhenExpanded: true },
-      M12: { weight: 0, title: '外資持股比重 vs 加權指數（長期）', icon: 'LineChart', wide: true },
+      M10: { weight: 0.06, title: '外資持股比重', icon: 'Flag', wideLg: true },
+      M11: { weight: 0, title: '外資持股比重 vs 加權指數（長期）', icon: 'LineChart', wide: true },
+      M12: { weight: 0.06, title: 'MACD+KD 短線時機', icon: 'Crosshair', wide: true },
       M13: { weight: 0, title: '外資持股擇時回測（可選標的）', icon: 'Crosshair', wide: true },
       M14: { weight: 0, title: 'EMA200 趨勢', icon: 'TrendingUp', wide: true },
     };
@@ -137,7 +137,7 @@
       return res.map(d => ({ ...d, osc: d.dif - d.macd }));
     };
 
-    // M11：MACD 自訂參數（DIF = EMA短 − EMA長；慢線 = DIF 的 EMA；柱體 = DIF − 慢線）
+    // M12：MACD 自訂參數（DIF = EMA短 − EMA長；慢線 = DIF 的 EMA；柱體 = DIF − 慢線）
     const calculateMACDCustom = (data, shortN, longN, signalN) => {
       let res = calculateEMA(data, shortN, 'close', 'emaS');
       res = calculateEMA(res, longN, 'close', 'emaL');
@@ -169,7 +169,37 @@
     // ==========================================
     // 2. SVG 圖表元件
     // ==========================================
-    const SvgLineChart = ({ data, lines, height = 150, labels = [], fmt = v => v.toFixed(2) }) => {
+    // 點擊（手機）或滑過（桌機）圖表，回傳對應的資料索引。mode：'line' 點落在兩端之間；'bar' 每根長條佔一格
+    const useChartHover = (n, mode = 'line') => {
+      const { useRef } = React;
+      const ref = useRef(null);
+      const [idx, setIdx] = useState(null);
+      const at = e => {
+        const el = ref.current;
+        if (!el || n < 1) return;
+        const r = el.getBoundingClientRect();
+        const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+        setIdx(mode === 'bar' ? Math.min(n - 1, Math.floor(f * n)) : Math.round(f * (n - 1)));
+      };
+      const xFrac = idx == null ? null : mode === 'bar' ? (idx + 0.5) / n : (n > 1 ? idx / (n - 1) : 0);
+      return { ref, idx, xFrac, handlers: { onMouseMove: at, onClick: at, onMouseLeave: () => setIdx(null) } };
+    };
+    // 垂直軸線＋資訊框（放在與 ref 相同、position:relative 的容器內）
+    const HoverMark = ({ xFrac, children }) => (xFrac == null ? null : (
+      <>
+        <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: `${xFrac * 100}%`, width: 1, background: '#9ca3af' }} />
+        <div className="absolute top-1 z-20 pointer-events-none bg-gray-900/95 border border-gray-600 rounded-md px-2 py-1 text-[11px] leading-snug whitespace-nowrap"
+          style={xFrac > 0.55 ? { right: `calc(${(1 - xFrac) * 100}% + 6px)` } : { left: `calc(${xFrac * 100}% + 6px)` }}>
+          {children}
+        </div>
+      </>
+    ));
+    const TipRow = ({ color, name, value }) => (
+      <div><span style={{ color }}>●</span> <span className="text-gray-400">{name}</span> <span className="text-gray-100 font-bold">{value}</span></div>
+    );
+
+    const SvgLineChart = ({ data, lines, height = 150, labels = [], fmt = v => v.toFixed(2), valueFmt }) => {
+      const hv = useChartHover(data ? data.length : 0, 'line');
       if (!data || data.length === 0) return null;
       let min = Infinity, max = -Infinity;
       data.forEach(d => lines.forEach(line => {
@@ -197,12 +227,22 @@
       };
 
       return (
-        <div className="relative w-full overflow-hidden text-xs" style={{ height }}>
-          <svg viewBox={`0 0 ${width} ${height}`} className="h-full overflow-visible" style={{ width: labels.length ? 'calc(100% - 92px)' : '100%' }} preserveAspectRatio="none">
-            {lines.map((line, i) => (
-              <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" strokeDasharray={line.dash} vectorEffect={line.dash ? 'non-scaling-stroke' : undefined} />
-            ))}
-          </svg>
+        <div className="relative w-full text-xs" style={{ height }}>
+          <div ref={hv.ref} {...hv.handlers} className="absolute top-0 left-0 bottom-0 cursor-crosshair" style={{ width: labels.length ? 'calc(100% - 92px)' : '100%' }}>
+            <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+              {lines.map((line, i) => (
+                <path key={i} d={getPath(line.key)} fill="none" stroke={line.color} strokeWidth={line.width || '2'} strokeLinejoin="round" strokeDasharray={line.dash} vectorEffect={line.dash ? 'non-scaling-stroke' : undefined} />
+              ))}
+            </svg>
+            <HoverMark xFrac={hv.xFrac}>
+              {hv.idx != null && <>
+                <div className="text-gray-300 font-bold">{data[hv.idx].date}</div>
+                {lines.filter((l, k) => (l.name || k === 0) && data[hv.idx][l.key] != null).map(l => (
+                  <TipRow key={l.key} color={l.color} name={l.name || ''} value={(valueFmt || fmt)(data[hv.idx][l.key])} />
+                ))}
+              </>}
+            </HoverMark>
+          </div>
           {(() => {
             // 右側數值標籤：依 y 由上而下排序，彼此至少相隔 14px，並限制在圖框內
             const pts = labels.filter(l => l.value != null)
@@ -220,7 +260,8 @@
       );
     };
 
-    const SvgBarChart = ({ data, dataKey, colorFn, height = 120 }) => {
+    const SvgBarChart = ({ data, dataKey, colorFn, height = 120, name = '', valueFmt = v => v.toFixed(2) }) => {
+      const hv = useChartHover(data ? data.length : 0, 'bar');
       if (!data || data.length === 0) return null;
       const max = Math.max(...data.map(d => Math.abs(d[dataKey] || 0))) * 1.1 || 1;
       const width = 1000;
@@ -228,7 +269,15 @@
       const spacing = (width / data.length) * 0.2;
 
       return (
-        <div className="relative w-full mt-2" style={{ height }}>
+        <div ref={hv.ref} {...hv.handlers} className="relative w-full mt-2 cursor-crosshair" style={{ height }}>
+          <HoverMark xFrac={hv.xFrac}>
+            {hv.idx != null && <>
+              <div className="text-gray-300 font-bold">{data[hv.idx].date}</div>
+              {Number.isFinite(data[hv.idx][dataKey])
+                ? <TipRow color={colorFn(data[hv.idx])} name={name} value={valueFmt(data[hv.idx][dataKey])} />
+                : <div className="text-gray-500">無資料</div>}
+            </>}
+          </HoverMark>
           <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full" preserveAspectRatio="none">
             <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="#4b5563" strokeWidth="1" strokeDasharray="4 4" />
             {data.map((d, i) => {
@@ -244,9 +293,10 @@
       );
     };
 
-    // M11 圖表：指數 + 買賣標記 / 柱體 / KD
-    const M11Chart = ({ data, trades = [], wide = false }) => {
+    // M12 圖表：指數 + 買賣標記 / 柱體 / KD
+    const M12Chart = ({ data, trades = [], wide = false }) => {
       const n = data.length;
+      const hv = useChartHover(n, 'bar');
       if (n < 2) return null;
       const { W, PH, HH, KH, GAP, fs } = wide
         ? { W: 1000, PH: 170, HH: 64, KH: 96, GAP: 20, fs: 12 }
@@ -303,6 +353,16 @@
       };
 
       return (
+        <div ref={hv.ref} {...hv.handlers} className="relative cursor-crosshair">
+        <HoverMark xFrac={hv.xFrac}>
+          {hv.idx != null && <>
+            <div className="text-gray-300 font-bold">{data[hv.idx].date}{data[hv.idx].signal ? (data[hv.idx].signal === 'buy' ? '　▲買進' : '　▼賣出') : ''}</div>
+            <TipRow color="#e5e7eb" name="收盤" value={Math.round(data[hv.idx].close).toLocaleString()} />
+            <TipRow color={data[hv.idx].hist > 0 ? '#ef4444' : '#22c55e'} name="柱體" value={data[hv.idx].hist.toFixed(0)} />
+            <TipRow color="#facc15" name="K" value={data[hv.idx].k.toFixed(1)} />
+            <TipRow color="#38bdf8" name="D" value={data[hv.idx].d.toFixed(1)} />
+          </>}
+        </HoverMark>
         <svg viewBox={`0 0 ${W} ${H + 16}`} className="w-full block">
           <text x="2" y="11" fontSize={fs} fill="#6b7280">加權指數</text>
           <path d={pricePath} fill="none" stroke="#e5e7eb" strokeWidth="1.5" strokeLinejoin="round" />
@@ -369,10 +429,46 @@
           <text x="0" y={H + 13} fontSize={fs} fill="#6b7280">{data[0].date}</text>
           <text x={W} y={H + 13} fontSize={fs} fill="#6b7280" textAnchor="end">{data[n - 1].date}</text>
         </svg>
+        </div>
       );
     };
 
-    // M11 策略切換：新＝柱體收斂第 3 根；舊＝柱體正負轉換。摘要與面板共用，並記住上次選擇。
+    // 策略回測模組（M12／M13／M14）共用的時間區間：任一模組切換，其他兩個同步，並記住上次選擇。
+    const SYNC_YEARS = [0.5, 1, 2, 3, 5, 10, 15];
+    const yLabel = y => (y === 0.5 ? '半年' : `${y} 年`);
+    const yearsStore = (() => {
+      let v = 1;
+      try { const x = Number(localStorage.getItem('strategy-years')); if (SYNC_YEARS.includes(x)) v = x; } catch (e) {}
+      return {
+        subs: new Set(),
+        get: () => v,
+        set(x) { v = x; try { localStorage.setItem('strategy-years', String(x)); } catch (e) {} this.subs.forEach(f => f(x)); },
+      };
+    })();
+    const useSyncYears = () => {
+      const [v, setV] = useState(yearsStore.get());
+      useEffect(() => { yearsStore.subs.add(setV); return () => { yearsStore.subs.delete(setV); }; }, []);
+      return [v, x => yearsStore.set(x)];
+    };
+    // 區間按鈕：一排放不下時可左右滑動
+    const RangeButtons = ({ value, onChange }) => (
+      <div className="flex gap-1 overflow-x-auto max-w-full pb-0.5" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
+        {SYNC_YEARS.map(y => (
+          <button key={y} onClick={() => onChange(y)}
+            className={`flex-shrink-0 px-3 py-1 rounded-md text-xs border transition-colors ${value === y ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+            {yLabel(y)}
+          </button>
+        ))}
+      </div>
+    );
+    // 自最新日期往前推 years 年的截止日（字串 YYYY-MM-DD）
+    const cutoffDate = (lastDate, years) => {
+      const d = new Date(lastDate);
+      d.setMonth(d.getMonth() - Math.round(years * 12));
+      return d.toISOString().slice(0, 10);
+    };
+
+    // M12 策略切換：新＝柱體收斂第 3 根；舊＝柱體正負轉換。摘要與面板共用，並記住上次選擇。
     const m11Store = (() => {
       let v = 'conv';
       try { const x = localStorage.getItem('m11-strategy'); if (x === 'conv' || x === 'cross') v = x; } catch (e) {}
@@ -382,14 +478,14 @@
         set(x) { v = x; try { localStorage.setItem('m11-strategy', x); } catch (e) {} this.subs.forEach(f => f(x)); },
       };
     })();
-    const useM11Strategy = () => {
+    const useM12Strategy = () => {
       const [v, setV] = useState(m11Store.get());
       useEffect(() => { m11Store.subs.add(setV); return () => { m11Store.subs.delete(setV); }; }, []);
       return [v, x => m11Store.set(x)];
     };
 
-    const M11Summary = ({ base, info }) => {
-      const [strat, setStrat] = useM11Strategy();
+    const M12Summary = ({ base, info }) => {
+      const [strat, setStrat] = useM12Strategy();
       const OPTS = [
         ['conv', '新｜收斂第 3 根', '空手時綠柱連續收斂第 3 根收盤買進；持有時紅柱連續收斂第 3 根收盤賣出（收斂＝同色柱比前一根短）'],
         ['cross', '舊｜正負轉換', '柱體由負轉正收盤買進；由正轉負收盤賣出'],
@@ -418,16 +514,15 @@
       );
     };
 
-    // M11 面板：區間切換 + 勝率/輸贏統計 + 圖表
-    const M11Panel = ({ td, expanded, head }) => {
+    // M12 面板：區間切換 + 勝率/輸贏統計 + 圖表
+    const M12Panel = ({ td, expanded, head }) => {
       const { useMemo } = React;
-      const [rangeKey, setRangeKey] = useState('y0.5');
-      const [strat] = useM11Strategy();
+      const [years, setYears] = useSyncYears();
+      const [strat] = useM12Strategy();
       const sigKey = strat === 'conv' ? 'sigConv' : 'sigCross';
       const WARM = 140;                       // 慢線 EMA130 暖機期，其前的訊號不計
       const n = td.length;
       // 日 = 交易日筆數；年 = 日曆年限（自最新日期往前推 N 年）
-      const RANGES = [0.5, 1, 2, 3, 5, 10].map(y => ({ key: `y${y}`, label: y === 0.5 ? '半年' : `${y} 年`, years: y }));
       const calcSize = r => {
         if (r.all) return n - WARM;
         if (r.years) {
@@ -440,7 +535,7 @@
         }
         return r.rows;
       };
-      const cur = RANGES.find(r => r.key === rangeKey) || RANGES[1];
+      const cur = { years };
       const size = Math.max(2, Math.min(calcSize(cur), n - WARM));
 
       const { view, trades, stats, bh, openTrade } = useMemo(() => {
@@ -489,14 +584,7 @@
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <p className="text-xs text-gray-500">統計＝區間內「賣出」的已平倉波段（依上方所選策略）· 收盤價計，未含手續費與證交稅</p>
-            <div className="flex flex-wrap gap-1">
-              {RANGES.map(r => (
-                <button key={r.key} onClick={() => setRangeKey(r.key)}
-                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${rangeKey === r.key ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
+            <RangeButtons value={years} onChange={setYears} />
           </div>
           {stats ? (
             <div className={`grid grid-cols-2 ${expanded ? 'md:grid-cols-6' : ''} gap-2 mb-2`}>
@@ -525,8 +613,8 @@
           {expanded && (
             <>
               {head}
-              <div className="md:hidden"><M11Chart data={view} trades={trades} /></div>
-              <div className="hidden md:block"><M11Chart data={view} trades={trades} wide /></div>
+              <div className="md:hidden"><M12Chart data={view} trades={trades} /></div>
+              <div className="hidden md:block"><M12Chart data={view} trades={trades} wide /></div>
               <p className="mt-2 text-xs text-gray-500 leading-relaxed">
                 <span className="text-red-400">金叉</span>／<span className="text-green-400">死叉</span>：KD 區 K 值由下往上穿越 D 值為金叉（短線轉強）、由上往下穿越為死叉（短線轉弱）；
                 柱體區為 MACD 的 DIF 穿越訊號線，即柱體由負轉正為金叉、由正轉負為死叉（「舊｜正負轉換」策略即依此買賣）。交叉只代表動能轉向，需搭配趨勢判斷。
@@ -543,8 +631,12 @@
     //  BB Long ＝ 前一日收盤在下軌之下、今日收盤「回到下軌之上」；BB Short ＝ 前一日收盤在上軌之上、今日收盤「回到上軌之下」。
     //  交易（本雷達自加）：空手遇 Long 以收盤買進（可選 EMA200 濾網：收盤須在 EMA200 之上才買）；持有遇 Short 以收盤賣出。
     //  可選停損（本雷達自加）：持有期間收盤較買進價下跌達 stopPct 即以當日收盤出場，當天不再接新訊號。
-    //  可選提早進場（本雷達自加）：改為收盤「第一次跌破下軌」當天就買，不等穿回通道內；賣出仍等 BB Short。
-    const runM14Strategy = (td, filter, stopPct = 0, early = false) => {
+    //  進場模式 entry（本雷達自加）：
+    //   'normal' 正常＝等 BB Long（收盤穿回下軌之上）才買；
+    //   'early'  提早＝收盤「第一次跌破下軌」當天就買，不等穿回通道內；
+    //   'auto'   自動＝當天收盤在 EMA200 之上（長線多頭）用提早進場，之下（長線空頭）用正常進場。
+    //   賣出一律等 BB Short（或停損）。
+    const runM14Strategy = (td, filter, stopPct = 0, entry = 'normal') => {
       let hold = null;
       const trades = [], marks = [];
       td.forEach((d, i) => {
@@ -558,6 +650,7 @@
         const p = td[i - 1];
         if (p.bbL == null) return;
         let type = null;
+        const early = entry === 'early' || (entry === 'auto' && d.ema200 != null && d.close >= d.ema200);
         if (early ? (p.close >= p.bbL && d.close < d.bbL) : (p.close <= p.bbL && d.close > d.bbL)) type = 'long';
         else if (p.close >= p.bbU && d.close < d.bbU) type = 'short';
         if (!type) return;
@@ -572,14 +665,16 @@
     // M14 面板：收盤／EMA50／EMA200／布林通道＋BB Long／BB Short 標記與實際進出場
     const M14Panel = ({ td, expanded, head }) => {
       const { useMemo, useState } = React;
-      const [range, setRange] = useState(250);
+      const [years, setYears] = useSyncYears();
       const [filter, setFilter] = useState(false);
       const [stop, setStop] = useState(false);
-      const [early, setEarly] = useState(false);
+      const [entry, setEntry] = useState('normal');   // normal／early／auto：提早與自動互斥，都不選＝正常進場
       const STOP_PCT = 0.05;
-      const res = useMemo(() => runM14Strategy(td, filter, stop ? STOP_PCT : 0, early), [td, filter, stop, early]);
-      const len = Math.min(range, td.length), base = td.length - len;
+      const res = useMemo(() => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry), [td, filter, stop, entry]);
+      const cut = cutoffDate(td[td.length - 1].date, years);
+      const base = Math.max(0, td.findIndex(d => d.date >= cut));
       const view = td.slice(base), n = view.length;
+      const hv = useChartHover(n, 'line');
       const W = 1000, H = 300;
       const vals = view.flatMap(d => [d.close, d.bbU, d.bbL]).filter(v => v != null);   // 縮放只看價格與布林，EMA 超出範圍時被裁切
       const mn = Math.min(...vals), mx = Math.max(...vals), pd = (mx - mn) * 0.05 || 1;
@@ -605,34 +700,27 @@
       const avgL = losses.length ? losses.reduce((s, t) => s + t.ret, 0) / losses.length * 100 : 0;
       const sg = v => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
       const fr = [0, 0.25, 0.5, 0.75, 1];
-      const RANGES = [{ label: '半年', v: 120 }, { label: '1 年', v: 250 }, { label: '2 年', v: 500 }, { label: '3 年', v: 750 }, { label: '5 年', v: 1250 }, { label: '10 年', v: 2500 }];
       const tickIdx = Array.from({ length: 5 }, (_, k) => Math.round(k * (n - 1) / 4));   // 手機只顯示頭、中、尾
       const TOGGLES = [
         { label: 'EMA200 濾網', on: filter, set: setFilter, desc: '收盤在 EMA200 之上才買' },
         { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價跌 5% 出場' },
-        { label: '提早進場', on: early, set: setEarly, desc: '收盤首次跌破下軌就買（逆勢接刀，可自行搭配停損）' },
+        { label: '提早進場', on: entry === 'early', set: () => setEntry(e => (e === 'early' ? 'normal' : 'early')), desc: '收盤首次跌破下軌就買（逆勢接刀，可自行搭配停損）' },
+        { label: '自動進場', on: entry === 'auto', set: () => setEntry(e => (e === 'auto' ? 'normal' : 'auto')), desc: 'EMA200 之上（多頭）提早買、之下（空頭）等穿回下軌才買；與提早進場二選一' },
       ];
 
       return (
         <div className="flex flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div className="flex flex-wrap gap-1">
-              {RANGES.map(r => (
-                <button key={r.label} onClick={() => setRange(r.v)}
-                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${range === r.v ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
+            <div className="w-full"><RangeButtons value={years} onChange={setYears} /></div>
             {TOGGLES.map(t => (
               <button key={t.label} onClick={() => t.set(v => !v)} aria-pressed={t.on} title={`${t.label}：${t.on ? '開' : '關'}`}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs border transition-colors ${t.on ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-                <span className="inline-block rounded-full" style={{ width: 7, height: 7, border: '1.5px solid currentColor', background: t.on ? 'currentColor' : 'transparent' }} />
+                className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-md text-xs border transition-colors ${t.on ? 'bg-green-700 border-green-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                <span className="hidden sm:inline-block rounded-full" style={{ width: 7, height: 7, border: '1.5px solid currentColor', background: t.on ? 'currentColor' : 'transparent' }} />
                 {t.label}
               </button>
             ))}
           </div>
-          {/* 開關說明固定顯示三項，只以顏色區分開／關，切換時版面不跳動 */}
+          {/* 開關說明固定顯示四項，只以顏色區分開／關，切換時版面不跳動 */}
           <p className="-mt-1 mb-3 text-xs leading-relaxed">
             {TOGGLES.map((t, k) => (
               <span key={t.label}>
@@ -651,7 +739,20 @@
                 </span>
               ))}
             </div>
-            <div className="flex-1 relative" style={{ height: H }}>
+            <div ref={hv.ref} {...hv.handlers} className="flex-1 relative cursor-crosshair" style={{ height: H }}>
+              <HoverMark xFrac={hv.xFrac}>
+                {hv.idx != null && (() => {
+                  const d = view[hv.idx], mk = res.marks.find(m => m.i === base + hv.idx);
+                  const f0 = v => (v == null ? '—' : Math.round(v).toLocaleString());
+                  return <>
+                    <div className="text-gray-300 font-bold">{d.date}{mk ? `　${mk.type === 'stop' ? '停損' : mk.early ? '提早買' : mk.type === 'long' ? 'BB Long' : 'BB Short'}${mk.exec ? '' : '（未成交）'}` : ''}</div>
+                    <TipRow color="#e5e7eb" name="收盤" value={f0(d.close)} />
+                    <TipRow color="#f87171" name="EMA50" value={f0(d.ema50)} />
+                    <TipRow color="#22c55e" name="EMA200" value={f0(d.ema200)} />
+                    <TipRow color="#a78bfa" name="布林上／下軌" value={`${f0(d.bbU)}／${f0(d.bbL)}`} />
+                  </>;
+                })()}
+              </HoverMark>
               <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full block overflow-hidden">
                 {fr.map(f => <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />)}
                 <path d={mk('bbU')} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
@@ -704,8 +805,8 @@
       );
     };
 
-    // M12 圖表：外資持股比重 vs 加權指數（長期，雙軸各自自動縮放；X 軸依日期比例排列）
-    // 近一個月外資持股比重（pp）與加權指數（%）的實際變化；用於 M12 文字說明，與圖表區間無關
+    // M11 圖表：外資持股比重 vs 加權指數（長期，雙軸各自自動縮放；X 軸依日期比例排列）
+    // 近一個月外資持股比重（pp）與加權指數（%）的實際變化；用於 M11 文字說明，與圖表區間無關
     const monthMove = rows => {
       const n = rows.length, last = rows[n - 1];
       if (last.index == null) return null;
@@ -719,7 +820,44 @@
       return { dr, di, label };
     };
 
-    const ForeignLongChart = ({ rows }) => {
+    const instDaily = raw => {
+      const by = {};
+      raw.forEach(d => {
+        const v = ((Number(d.buy) || 0) - (Number(d.sell) || 0)) / 1e8;
+        const k = /Foreign/.test(d.name) ? 'fi' : d.name === 'Investment_Trust' ? 'it' : /Dealer/.test(d.name) ? 'dl' : null;
+        if (!k) return;
+        if (!by[d.date]) by[d.date] = { date: d.date, fi: 0, it: 0, dl: 0 };
+        by[d.date][k] += v;
+      });
+      return Object.values(by).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, tot: d.fi + d.it + d.dl }));
+    };
+
+    // 三大法人累計買賣超（自所選區間起點累加，億元）
+    const InstCumChart = ({ inst, cutoff }) => {
+      const v = inst.filter(d => d.date >= cutoff);
+      if (v.length < 2) return null;
+      let a = { fi: 0, it: 0, dl: 0, tot: 0 };
+      const data = v.map(d => (a = { date: d.date, fi: a.fi + d.fi, it: a.it + d.it, dl: a.dl + d.dl, tot: a.tot + d.tot }));
+      const L = data[data.length - 1];
+      const LINES = [['tot', '三大法人合計', '#f8fafc', '2.2'], ['fi', '外資', '#60a5fa', '1.5'], ['it', '投信', '#f59e0b', '1.5'], ['dl', '自營商', '#a78bfa', '1.5']];
+      const f = x => `${x >= 0 ? '+' : ''}${Math.round(x).toLocaleString()}`;
+      return (
+        <div className="mt-4 pt-3 border-t border-gray-700">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 mb-2">
+            <p className="text-xs text-gray-400">三大法人累計買賣超（{data[0].date} 起累加，億元）{inst[0].date > cutoff && <span className="text-yellow-500">· 資料自 {inst[0].date.slice(0, 7)} 起</span>}</p>
+            <div className="text-xs flex flex-wrap gap-x-3 gap-y-1">
+              {LINES.map(([k, nm, c]) => <span key={k} className="whitespace-nowrap" style={{ color: c }}>— {nm}</span>)}
+            </div>
+          </div>
+          <SvgLineChart data={data} height={130}
+            lines={LINES.map(([k, nm, c, w]) => ({ key: k, color: c, width: w, name: nm }))}
+            labels={LINES.map(([k, nm, c]) => ({ value: L[k], color: c, text: `${nm} ${f(L[k])}` }))}
+            fmt={x => f(x)} valueFmt={x => `${f(x)} 億`} />
+        </div>
+      );
+    };
+
+    const ForeignLongChart = ({ rows, inst }) => {
       const { useMemo, useRef, useCallback } = React;
       const [years, setYears] = useState(5);
       const [hov, setHov] = useState(null);
@@ -810,7 +948,7 @@
               ))}
             </div>
             <div ref={boxRef} className="flex-1 relative cursor-crosshair" style={{ height: H }}
-              onMouseMove={onMove} onMouseLeave={() => setHov(null)}>
+              onMouseMove={onMove} onClick={onMove} onMouseLeave={() => setHov(null)}>
               <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full block overflow-visible">
                 {fr.map(f => (
                   <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
@@ -844,6 +982,7 @@
               </span>
             ))}
           </div>
+          {inst && inst.length > 1 && <InstCumChart inst={inst} cutoff={cutoff} />}
         </>
       );
     };
@@ -906,7 +1045,7 @@
     // 兩個副圖共用同一條時間軸（依日期比例排列）。
     const ForeignTimingChart = ({ rows, expanded, head }) => {
       const { useMemo, useRef, useCallback } = React;
-      const [years, setYears] = useState(5);
+      const [years, setYears] = useSyncYears();
       const [hov, setHov] = useState(null);
       const ASSETS = [['TAIEX', '加權指數', '加權指數'], ['0050', '0050 元大台灣50', '0050'], ['0052', '0052 富邦科技', '0052'], ['0056', '0056 元大高股息', '0056'],
         ['006208', '006208 富邦台50', '006208'], ['00631L', '00631L 台灣50正2', '00631L'], ['00685L', '00685L 加權正2', '00685L'],
@@ -1051,7 +1190,6 @@
         setHov(Math.abs(ts[lo] - target) <= Math.abs(ts[hi] - target) ? lo : hi);
       }, [ts]);
 
-      const RANGES = [1, 2, 3, 5, 10, 15].map(y => ({ label: `${y} 年`, y }));
       if (n < 2) return <p className="text-gray-500 text-sm text-center py-6">資料不足。</p>;
 
       const W = 1000, HA = 270, HB = 120, GAP = 16;
@@ -1138,16 +1276,9 @@
               {view[0].date < DAILY_FROM && <span className="text-gray-500">{' · '}{DAILY_FROM.slice(0, 7)} 之前持股比重為每週一筆</span>}
               {' · '}<span className="text-red-400">金叉 {nGold}</span> / <span className="text-green-400">死叉 {crosses.length - nGold}</span>
               <span className="text-gray-500">（{MA_S} 日均線穿越 {MA_L} 日均線）</span>
-              {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {years} 年</span>}
+              {!covered && <span className="text-yellow-500">{' · '}資料自 {rows[0].date} 起，未涵蓋完整 {yLabel(years)}</span>}
             </p>
-            <div className="flex flex-wrap gap-1">
-              {RANGES.map(r => (
-                <button key={r.y} onClick={() => setYears(r.y)}
-                  className={`px-3 py-1 rounded-md text-xs border transition-colors ${years === r.y ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-                  {r.label}
-                </button>
-              ))}
-            </div>
+            <RangeButtons value={years} onChange={setYears} />
           </div>
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <span className="text-xs text-gray-500 w-full sm:w-auto">均線參數</span>
@@ -1317,7 +1448,7 @@
                 ))}
               </div>
             </div>
-            <div ref={boxRef} className="flex-1 relative cursor-crosshair min-w-0" onMouseMove={onMove} onMouseLeave={() => setHov(null)}>
+            <div ref={boxRef} className="flex-1 relative cursor-crosshair min-w-0" onMouseMove={onMove} onClick={onMove} onMouseLeave={() => setHov(null)}>
               {/* 上：K 線 */}
               <div className="relative" style={{ height: HA }}>
                 <svg viewBox={`0 0 ${W} ${HA}`} preserveAspectRatio="none" className="w-full h-full block overflow-visible">
@@ -1474,11 +1605,11 @@
         { id:'M2', label:'台積電', type:'line', color:'#facc15', fmt: v => v != null ? v.toLocaleString() : '—' },
         { id:'M7', label:'SOX',   type:'line', color:'#38bdf8', fmt: v => v != null ? v.toFixed(1) : '—' },
         { id:'M6', label:'MACD',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? v.toFixed(1) : '—' },
-        { id:'M11', label:'柱體', type:'bar', colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? v.toFixed(0) : '—' },
+        { id:'M12', label:'柱體', type:'bar', colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? v.toFixed(0) : '—' },
         { id:'M9', label:'夜盤',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(2)}%` : '—' },
         { id:'M3', label:'外資',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M10', label:'外資比', type:'line', color:'#60a5fa', fmt: v => v != null ? `${v.toFixed(2)}%` : '—' },
-        { id:'M12', label:'扣台積', type:'line', color:'#93c5fd', fmt: v => v != null ? `${v.toFixed(2)}%` : '—' },
+        { id:'M11', label:'扣台積', type:'line', color:'#93c5fd', fmt: v => v != null ? `${v.toFixed(2)}%` : '—' },
         { id:'M4', label:'融資',  type:'line', color:'#c084fc', fmt: v => v != null ? `${Math.round(v)}億` : '—' },
         { id:'M8', label:'公股',  type:'bar',  colorFn: v => v > 0 ? '#ef4444' : '#22c55e', fmt: v => v != null ? `${v>0?'+':''}${v.toFixed(1)}億` : '—' },
         { id:'M5', label:'量能',  type:'bar',  colorFn: v => '#94a3b8',                      fmt: v => v != null ? `${v.toFixed(0)}億` : '—' },
@@ -1541,6 +1672,7 @@
               ref={chartRef}
               className="flex-1 relative cursor-crosshair"
               onMouseMove={handleMouseMove}
+              onClick={handleMouseMove}
               onMouseLeave={() => setHovIdx(null)}
             >
               <svg
@@ -1952,11 +2084,14 @@
           <SvgLineChart
             data={chartData}
             lines={[
-              { key:'close', color:'#ffffff', width:'2' },
-              { key:'sma60', color:'#facc15', width:'1.5' },
-              ...levels.map(l => ({ key: l.key, color: l.color, width: '1.5', dash: l.dash })),
+              { key:'close', color:'#ffffff', width:'2', name:'收盤' },
+              { key:'sma60', color:'#facc15', width:'1.5', name:'季線' },
+              ...levels.map(l => ({ key: l.key, color: l.color, width: '1.5', dash: l.dash, name: l.name })),
             ]}
-            labels={levels.map(l => ({ value: l.value, color: l.color, text: `${l.name} ${Math.round(l.value).toLocaleString()}` }))}
+            labels={[
+              { value: chartData[chartData.length - 1].close, color: '#ffffff', text: `收盤 ${Math.round(chartData[chartData.length - 1].close).toLocaleString()}` },
+              ...levels.map(l => ({ value: l.value, color: l.color, text: `${l.name} ${Math.round(l.value).toLocaleString()}` })),
+            ]}
             fmt={v => Math.round(v).toLocaleString()}
             height={150}
           />
@@ -2011,7 +2146,7 @@
       }
 
       return (
-        <div className={`bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-lg flex flex-col h-full ${config.wide || (config.wideWhenExpanded && isExpanded) ? 'md:col-span-2 lg:col-span-3' : ''}`}>
+        <div className={`bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-lg flex flex-col h-full ${config.wide || (config.wideWhenExpanded && isExpanded) ? 'md:col-span-2 lg:col-span-3' : config.wideLg ? 'lg:col-span-3' : ''}`}>
           <div className="flex justify-between items-center cursor-pointer" onClick={onToggle}>
             <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
               <div className="p-2 bg-gray-700 rounded-lg flex-shrink-0">
@@ -2092,17 +2227,17 @@
       const [lastUpdated, setLastUpdated] = useState('');
       const [isRefreshing, setIsRefreshing] = useState(false);
       const [revData, setRevData] = useState(null);
-      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null, M10:null, M11:null, M12:null, M13:null, M14:null });
+      const [moduleData, setModuleData] = useState({ M1:null, M2:null, M3:null, M4:null, M5:null, M6:null, M7:null, M8:null, M9:null, M10:null, M12:null, M11:null, M13:null, M14:null });
       const [moduleErrors, setModuleErrors] = useState({});
-      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true, M12:true, M13:true, M14:true });
-      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false, M10:false, M11:false, M12:false, M13:false, M14:false });
+      const [moduleLoading, setModuleLoading] = useState({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M12:true, M11:true, M13:true, M14:true });
+      const [expandedCards, setExpandedCards] = useState({ M1:false, M2:false, M3:false, M4:false, M5:false, M6:false, M7:false, M8:false, M9:false, M10:false, M12:false, M11:false, M13:false, M14:false });
 
       const saveToken = (t) => { setToken(t); localStorage.setItem('finmind_token', t); };
 
       const fetchAllData = async () => {
         setIsRefreshing(true);
         setModuleErrors({});
-        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M11:true, M12:true, M13:true, M14:true });
+        setModuleLoading({ M1:true, M2:true, M3:true, M4:true, M5:true, M6:true, M7:true, M8:true, M9:true, M10:true, M12:true, M11:true, M13:true, M14:true });
 
         const startDate  = getPastDateString(8);
         const recentDate = getPastDateString(3);
@@ -2200,6 +2335,11 @@
               start => fetchFinMind('TaiwanStockPrice', id, token, start || startDate).then(r => r.map(d => ({ date: d.date, close: d.close }))));
             const [tsmc, delta, mtk, etf50] = await Promise.all(['2330', '2308', '2454', '0050'].map(loadStock));
             if ([tsmc, delta, mtk, etf50].some(a => a.length < 61)) throw new Error('權值股資料不足（等待每日資料更新）');
+            const loadRef = code => fetch(`./data/assets/${code}.json`).then(r => (r.ok ? r.json() : null))
+              .then(j => (j && j.rows ? calculateSMA(j.rows.slice(-300).map(r => ({ date: r[0], close: r[4] })), 60) : null)).catch(() => null);
+            const [phisonData, z685Data] = await Promise.all([loadRef('8299'), loadRef('00685L')]);
+            const refTxt = [['8299 群聯', phisonData], ['00685L 加權正2', z685Data]].filter(([, d]) => d && d.length)
+              .map(([nm, d]) => `${nm}${d[d.length - 1].close > d[d.length - 1].sma60 ? '站上' : '跌破'}季線`).join('、');
             const tsmcData  = calculateSMA(tsmc.map(d => ({ date:d.date, close:d.close })), 60);
             const deltaData = calculateSMA(delta.map(d => ({ date:d.date, close:d.close })), 60);
             const mtkData   = calculateSMA(mtk.map(d => ({ date:d.date, close:d.close })), 60);
@@ -2222,7 +2362,7 @@
             setModuleData(prev => ({...prev, M2: {
               status,
               alignedData: tsmcData.slice(-60).map(d => ({ date: d.date, value: d.close })),
-              summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，0050${etf50Above?'站上':'跌破'}季線。共 ${aboveCount}/4 檔位於季線之上。`,
+              summary: `台積電(2330)${tsmcAbove?'站上':'跌破'}季線，0050${etf50Above?'站上':'跌破'}季線。共 ${aboveCount}/4 檔位於季線之上。${refTxt ? `參考（不計分）：${refTxt}。` : ''}`,
               plain: `季線是近 3 個月的平均成本，站上代表買的人多半賺錢、走勢偏強。4 檔權值股有 ${aboveCount} 檔站上季線；台積電占大盤權重最大，它${tsmcAbove ? '守住季線，大盤就有支撐' : '跌破季線，大盤很難強起來'}。`
                 + (aboveCount >= 3 ? '權值股整體健康，是撐盤的主力。' : aboveCount <= 1 ? '多數權值股轉弱，大盤缺少領頭羊，宜保守。' : '權值股強弱分歧，大盤容易來回震盪。'),
               chartTitle: '權值股走勢（近 120 日）',
@@ -2238,10 +2378,13 @@
                     ['2308 台達電', deltaData, '#4ade80'],
                     ['2454 聯發科', mtkData,   '#c084fc'],
                     ['0050 元大台灣50', etf50Data, '#fb923c'],
-                  ].map(([label, d, color]) => (
+                    ['8299 群聯（參考，不計分）', phisonData, '#f472b6'],
+                    ['00685L 加權正2（參考，不計分）', z685Data, '#2dd4bf'],
+                  ].filter(([, d]) => d && d.length).map(([label, d, color]) => (
                     <div key={label}>
                       <p className="text-xs font-medium mb-1" style={{color}}>{label}</p>
-                      <SvgLineChart data={d.slice(-120)} lines={[{key:'close',color,width:'2'},{key:'sma60',color:'#facc15',width:'1.5'}]} height={80} />
+                      <SvgLineChart data={d.slice(-120)} lines={[{key:'close',color,width:'2',name:'收盤'},{key:'sma60',color:'#facc15',width:'1.5',name:'季線'}]} height={80}
+                        fmt={v => (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2))} />
                     </div>
                   ))}
                 </div>
@@ -2286,7 +2429,7 @@
                 : last5Total < -100 ? `外資近 ${n} 天合計賣超 ${Math.round(-last5Total)} 億，大戶資金在撤出，指數要往上會比較吃力。`
                 : `外資近 ${n} 天買賣金額不大（${Math.round(last5Total)} 億），沒有明顯方向，還在觀望。`,
               chartTitle: '外資大盤買賣超（近 60 日，億元）',
-              renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} />,
+              renderChart: () => <SvgBarChart data={chartData} dataKey="netBuy" colorFn={d => d.netBuy > 0 ? '#ef4444' : '#22c55e'} name="外資買賣超" valueFmt={v => `${v > 0 ? '+' : ''}${v.toFixed(1)} 億`} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M3:e.message})); }
           finally    { setModuleLoading(prev => ({...prev, M3:false})); }
@@ -2408,7 +2551,7 @@
                   : priceUp ? '上漲但量能不足，追價意願不強，漲勢可能走不遠。'
                   : '下跌但量縮，賣壓不算重，比較像是整理。'),
               chartTitle: '加權指數成交量（近 60 日，億）',
-              renderChart: () => <SvgBarChart data={volTd.slice(-60)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} />,
+              renderChart: () => <SvgBarChart data={volTd.slice(-60)} dataKey="volume" colorFn={d => d.close > d.open ? '#ef4444' : '#22c55e'} name="成交量" valueFmt={v => `${Math.round(v).toLocaleString()} 億`} />,
             }}));
 
             const over60  = last.close > last.sma60;
@@ -2441,7 +2584,10 @@
               renderChart: () => (
                 <SvgLineChart
                   data={td.slice(-120)}
-                  lines={[{key:'close',color:'#ffffff',width:'2'},{key:'sma60',color:'#facc15',width:'1.5'},{key:'sma120',color:'#c084fc',width:'1.5'},{key:'sma240',color:'#38bdf8',width:'1.5'}]}
+                  lines={[{key:'close',color:'#ffffff',width:'2',name:'收盤'},{key:'sma60',color:'#facc15',width:'1.5',name:'季線'},{key:'sma120',color:'#c084fc',width:'1.5',name:'半年線'},{key:'sma240',color:'#38bdf8',width:'1.5',name:'年線'}]}
+                  labels={[['close','收盤','#ffffff'],['sma60','季線','#facc15'],['sma120','半年線','#c084fc'],['sma240','年線','#38bdf8']]
+                    .filter(([k]) => last[k] != null).map(([k, nm, c]) => ({ value: last[k], color: c, text: `${nm} ${Math.round(last[k]).toLocaleString()}` }))}
+                  fmt={v => Math.round(v).toLocaleString()}
                 />
               ),
             }}));
@@ -2583,6 +2729,8 @@
                   dataKey="total"
                   colorFn={d => d.total > 0 ? '#ef4444' : '#22c55e'}
                   height={100}
+                  name="公股買賣超"
+                  valueFmt={v => `${v > 0 ? '+' : ''}${v.toFixed(1)} 億`}
                 />
               ),
             }}));
@@ -2590,8 +2738,8 @@
           finally    { setModuleLoading(prev => ({...prev, M8:false})); }
         };
 
-        // M11 MACD(9/12/130) + KD(9,3,3) 短線時機
-        const processM11 = async () => {
+        // M12 MACD(9/12/130) + KD(9,3,3) 短線時機
+        const processM12 = async () => {
           try {
             const raw = await loadWithDelta('./data/taiex.json',
               start => fetchFinMind('TaiwanStockPrice', 'TAIEX', token, start || getPastDateString(5))
@@ -2660,14 +2808,14 @@
               cross: lastSig('sigCross') + (holdX ? '持有中。' : '空手。'),
             };
 
-            setModuleData(prev => ({...prev, M11: {
+            setModuleData(prev => ({...prev, M12: {
               status: c.status,
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.hist })),
               plain: `MACD 柱體看中期動能，KD 看短線轉折。柱體${histPos ? '為正' : '為負'}且${expanding ? '持續擴大' : '正在縮小'}，`
                 + (histPos ? (expanding ? '多頭動能還在增強；' : '上漲力道在減弱；') : (expanding ? '下跌動能還在增強，先別急著接；' : '跌勢有放緩跡象，可以開始留意轉折；'))
                 + `K 值${kAbove ? '在 D 值之上，短線偏強。' : '在 D 值之下，短線偏弱。'}`
                 + (last.k < 20 ? '目前在超賣區，短線跌深，隨時可能反彈，但也可能繼續超賣（鈍化）。' : last.k > 80 ? '目前在超買區，短線漲多，追高要小心。' : ''),
-              summary: <M11Summary info={sigInfo} base={`MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}`} />,
+              summary: <M12Summary info={sigInfo} base={`MACD(9/12/130) 柱體 ${last.hist > 0 ? '+' : ''}${last.hist.toFixed(0)}（${histPos ? '正' : '負'}向${expanding ? '增強' : '減弱'}），K ${last.k.toFixed(1)} / D ${last.d.toFixed(1)}（K 在 D ${kAbove ? '上方' : '下方'}）。${c.text}。${zone}${crossToday}`} />,
               chartTitle: '▲買進 ▼賣出（依所選策略）· 連線＝一個波段',
               legend: (<>
                 <span className="text-red-400 whitespace-nowrap">▲買進</span>
@@ -2677,19 +2825,30 @@
                 <span className="text-yellow-400 whitespace-nowrap">K</span>
                 <span className="text-sky-400 whitespace-nowrap">D</span>
               </>),
-              renderBlock: (ex, head) => <M11Panel td={td} expanded={ex} head={head} />,
+              renderBlock: (ex, head) => <M12Panel td={td} expanded={ex} head={head} />,
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M11:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M11:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M12:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M12:false})); }
         };
 
-        // M12 外資持股比重 vs 加權指數（長期對照；不計入評分）
-        const processM12 = async () => {
+        // M11 外資持股比重 vs 加權指數（長期對照；不計入評分）
+        const processM11 = async () => {
           try {
-            const [fh, tx] = await Promise.all([
+            const [fh, tx, instRaw] = await Promise.all([
               fetch('./data/foreign-holding.json').then(r => { if (!r.ok) throw new Error('外資持股資料尚未建立。'); return r.json(); }),
               fetch('./data/taiex.json').then(r => r.ok ? r.json() : []).catch(() => []),
+              fetch('./data/institutional.json').then(r => r.ok ? r.json() : []).catch(() => []),
             ]);
+            const inst = instDaily(instRaw);
+            // 近一年三大法人合計買賣超
+            const inst1y = (() => {
+              if (!inst.length) return null;
+              const cut = cutoffDate(inst[inst.length - 1].date, 1);
+              const s1 = inst.filter(d => d.date >= cut).reduce((a, d) => ({ fi: a.fi + d.fi, it: a.it + d.it, dl: a.dl + d.dl, tot: a.tot + d.tot }), { fi: 0, it: 0, dl: 0, tot: 0 });
+              return s1;
+            })();
+            const f1 = x => `${x >= 0 ? '+' : ''}${Math.round(x).toLocaleString()} 億`;
+            const instTxt = inst1y ? `近一年三大法人合計買賣超 ${f1(inst1y.tot)}（外資 ${f1(inst1y.fi)}、投信 ${f1(inst1y.it)}、自營商 ${f1(inst1y.dl)}）。` : '';
             const px = Object.fromEntries(tx.map(d => [d.date, d.close]));
             const rows = fh.sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, index: d.idx ?? px[d.date] ?? null }));
             if (rows.length < 21) throw new Error('外資持股資料不足 21 日。');
@@ -2714,7 +2873,7 @@
               })
               .filter(Boolean);
 
-            setModuleData(prev => ({...prev, M12: {
+            setModuleData(prev => ({...prev, M11: {
               status: 'info',
               alignedData: rows.slice(-60).map(d => ({ date: d.date, value: d.exTsmc })),
               plain: (() => {
@@ -2726,23 +2885,24 @@
                 const mm = monthMove(rows);
                 const recent = mm ? `近一個月指數${mm.di >= 0 ? '漲' : '跌'} ${Math.abs(mm.di).toFixed(1)}%、外資持股${mm.dr >= 0 ? '增加' : '減少'} ${Math.abs(mm.dr).toFixed(2)} 個百分點，屬於「${mm.label}」。` : '';
                 const tail = '（這是長期對照，不是買賣訊號：回測顯示外資與指數背離後，指數並沒有比平常更容易上漲。）';
-                if (!o || o.index == null || last.index == null) return head + recent + tail;
+                const instPlain = inst1y ? `近一年三大法人合計${inst1y.tot >= 0 ? '買超' : '賣超'} ${Math.abs(Math.round(inst1y.tot)).toLocaleString()} 億，其中投信${inst1y.it >= 0 ? '買超' : '賣超'} ${Math.abs(Math.round(inst1y.it)).toLocaleString()} 億${inst1y.fi < 0 && inst1y.it > 0 ? '，外資賣、投信接，內資是主要買盤' : ''}。` : '';
+                if (!o || o.index == null || last.index == null) return head + recent + instPlain + tail;
                 const dr = last.ratio - o.ratio, di = (last.index / o.index - 1) * 100;
                 return head + (di > 0 && dr < 0 ? `近一年指數漲 ${di.toFixed(0)}%，外資持股比重卻降 ${(-dr).toFixed(2)} 個百分點，代表漲勢主要靠內資推動，或外資逢高調節。`
                   : di > 0 && dr >= 0 ? `近一年指數漲 ${di.toFixed(0)}%，外資持股比重也增加 ${dr.toFixed(2)} 個百分點，外資和指數同步看好。`
                   : di <= 0 && dr < 0 ? `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重也降 ${(-dr).toFixed(2)} 個百分點，外資在撤出。`
-                  : `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重卻增加 ${dr.toFixed(2)} 個百分點，外資逢低布局。`) + recent + tail;
+                  : `近一年指數跌 ${(-di).toFixed(0)}%，外資持股比重卻增加 ${dr.toFixed(2)} 個百分點，外資逢低布局。`) + recent + instPlain + tail;
               })(),
-              summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（不含台積電 ${last.exTsmc.toFixed(2)}%）。資料自 ${rows[0].date} 起（${n} 筆）的區間為 ${rMin.toFixed(2)}%~${rMax.toFixed(2)}%，目前位於 ${pos}% 位置。${horizons.length ? '持股比重較 ' + horizons.join('、') + '。' : ''}`,
-              chartTitle: '持股比重 vs 加權指數（半年～10 年，兩軸各自自動縮放）',
+              summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（不含台積電 ${last.exTsmc.toFixed(2)}%）。資料自 ${rows[0].date} 起（${n} 筆）的區間為 ${rMin.toFixed(2)}%~${rMax.toFixed(2)}%，目前位於 ${pos}% 位置。${horizons.length ? '持股比重較 ' + horizons.join('、') + '。' : ''}${instTxt}`,
+              chartTitle: '持股比重 vs 加權指數（兩軸各自縮放）＋三大法人累計買賣超',
               legend: (<>
                 <span className="text-blue-400 whitespace-nowrap">— 左軸：持股比重</span>
                 <span className="text-red-400 whitespace-nowrap">- - 右軸：加權指數</span>
               </>),
-              renderChart: () => <ForeignLongChart rows={rows} />,
+              renderChart: () => <ForeignLongChart rows={rows} inst={inst} />,
             }}));
-          } catch(e) { setModuleErrors(prev => ({...prev, M12:e.message})); }
-          finally    { setModuleLoading(prev => ({...prev, M12:false})); }
+          } catch(e) { setModuleErrors(prev => ({...prev, M11:e.message})); }
+          finally    { setModuleLoading(prev => ({...prev, M11:false})); }
         };
 
         // M13 外資持股擇時回測：持股比重均線金叉買進／死叉賣出，買進標的可選（不計入評分）
@@ -2762,7 +2922,7 @@
               status: 'info',
               plain: `以預設的 30／90 日均線來看，外資持股的短均線目前在長均線${above ? '之上' : '之下'}，代表外資持股趨勢${above ? '向上，策略處於持有（金叉後）' : '向下，策略處於空手（死叉後）'}${crossAt ? `，上一次交叉在 ${crossAt}` : ''}。這是跟著外資長線進出的擇時參考，不計入評分。`,
               summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（${last.date}）。以持股比重的短均線（20／30／60 日）由下穿越長均線（60／90／180 日）為金叉買進、由上穿越為死叉賣出，可切換均線參數與買進標的（加權指數、ETF、個股、正 2），圖上標示金叉死叉、買賣點與波段報酬，並與買進持有對照。回測僅供參考，不計入評分。`,
-              chartTitle: '標的 K 線＋買賣標記（上）／外資持股比重與均線（下）· 1／2／3／5／10／15 年',
+              chartTitle: '標的 K 線＋買賣標記（上）／外資持股比重與均線（下）· 半年～15 年（與 M12、M14 同步）',
               renderBlock: (ex, head) => <ForeignTimingChart rows={rows} expanded={ex} head={head} />,
             }}));
           } catch(e) { setModuleErrors(prev => ({...prev, M13:e.message})); }
@@ -2888,7 +3048,7 @@
               plain: `外資持股比重代表外資在台股放了多少錢。近 20 天${d20 >= 0 ? '增加' : '減少'} ${Math.abs(d20).toFixed(2)} 個百分點、近 5 天${d5 >= 0 ? '增加' : '減少'} ${Math.abs(d5).toFixed(2)} 個百分點，`
                 + (status === 'green' ? '外資在加碼台股，中長線偏多。' : status === 'red' ? '外資明顯在減碼；如果指數還在高檔，屬於背離，要提高警覺。' : '變化不大，外資態度觀望。'),
               summary: `外資持股占上市總市值 ${latest.ratio.toFixed(2)}%（不含台積電 ${latest.exTsmc.toFixed(2)}%）。近 20 日 ${sg(d20)}pp、近 5 日 ${sg(d5)}pp${d60 != null ? `、近 60 日 ${sg(d60)}pp` : ''}，位於近 ${n} 日區間的 ${pos}% 位置。持股 ≥50% 的個股 ${latest.over50} 檔。${status === 'green' ? '外資持股比重回升，籌碼面偏多。' : status === 'red' ? '外資持股比重明顯下降（近 20 日降逾 1pp），若指數同步在高檔屬背離，需提高警覺。' : '外資持股比重變動不大，方向未明。'}`,
-              chartTitle: `評分指標（近 ${n} 日）· 完整走勢與加權指數對照見 M12`,
+              chartTitle: `評分指標（近 ${n} 日）· 完整走勢與加權指數對照見 M11`,
               renderChart: () => {
                 const rc = v => (v > 0 ? 'text-red-400' : v < 0 ? 'text-green-400' : 'text-gray-400');
                 const tile = (label, value, sub) => (
@@ -2999,6 +3159,8 @@
                   dataKey="value"
                   colorFn={d => d.value > 0 ? '#ef4444' : '#22c55e'}
                   height={100}
+                  name="夜盤漲跌"
+                  valueFmt={v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`}
                 />
               ),
             }}));
@@ -3006,7 +3168,7 @@
           finally    { setModuleLoading(prev => ({...prev, M9:false})); }
         };
 
-        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processM10(), processM11(), processM12(), processM13(), processM14(), processRevenue()]);
+        await Promise.allSettled([processM0(), processM1(), processM2(), processM3(), processM4M5(), processM6(), processM7(), processM8(), processM10(), processM12(), processM11(), processM13(), processM14(), processRevenue()]);
 
         const now = new Date();
         setLastUpdated(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`);
@@ -3039,7 +3201,7 @@
       const isAllExpanded = Object.values(expandedCards).every(Boolean);
       const handleToggleAll = () => {
         const v = !isAllExpanded;
-        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v, M10:v, M11:v, M12:v, M13:v, M14:v });
+        setExpandedCards({ M1:v, M2:v, M3:v, M4:v, M5:v, M6:v, M7:v, M8:v, M9:v, M10:v, M12:v, M11:v, M13:v, M14:v });
       };
 
       const score = calculateScore();
