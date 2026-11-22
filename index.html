@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.04';
+    const APP_VERSION = 'v 20261122.05';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -698,14 +698,29 @@
       return { marks, trades, hold, eq };
     };
 
+    // 記住使用者上次的選擇（只存在此瀏覽器）；讀不到或值不合法時用預設值
+    const usePersist = (key, def, valid) => {
+      const [v, setV] = useState(() => {
+        try { const x = JSON.parse(localStorage.getItem(key)); return valid(x) ? x : def; } catch (e) { return def; }
+      });
+      const set = x => setV(prev => {
+        const nv = typeof x === 'function' ? x(prev) : x;
+        try { localStorage.setItem(key, JSON.stringify(nv)); } catch (e) {}
+        return nv;
+      });
+      return [v, set];
+    };
+
     // M14 面板：收盤／EMA50／EMA200／布林通道＋BB Long／BB Short 標記與實際進出場
     const M14Panel = ({ td, expanded, head }) => {
       const { useMemo, useState } = React;
       const [years, setYears] = useSyncYears();
-      const [filter, setFilter] = useState(false);
-      const [stop, setStop] = useState(false);
-      const [entry, setEntry] = useState('normal');   // normal／early／auto：提早與自動互斥，都不選＝正常進場
-      const [lots, setLots] = useState(1);            // 1＝一般（全進全出）；2／3＝進 N 出 N
+      // 預設「提早進場＋進 2 出 2」（回測各區間最穩定的組合），之後記住上次的選擇
+      const isBool = x => typeof x === 'boolean';
+      const [filter, setFilter] = usePersist('m14-filter', false, isBool);
+      const [stop, setStop] = usePersist('m14-stop', false, isBool);
+      const [entry, setEntry] = usePersist('m14-entry', 'early', x => ['normal', 'early', 'auto'].includes(x));   // 提早與自動互斥，都不選＝正常進場
+      const [lots, setLots] = usePersist('m14-lots', 2, x => [1, 2, 3].includes(x));                            // 1＝一般（全進全出）；2／3＝進 N 出 N
       const STOP_PCT = 0.05;
       // 三種分批模式同時計算，供冠亞季軍排名；圖表與統計顯示所選模式
       const resAll = useMemo(() => [1, 2, 3].map(N => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry, N)), [td, filter, stop, entry]);
