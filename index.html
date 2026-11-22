@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261122.06';
+    const APP_VERSION = 'v 20261122.07';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -647,12 +647,14 @@
     //   停損以平均成本計，觸發時全數出場。另記錄每日帳戶權益 eq（總資金 1 起算，含持有中），供分批時計算報酬。
     const runM14Strategy = (td, filter, stopPct = 0, entry = 'normal', lots = 1) => {
       let cash = 1, units = [], cost = 0, lastSell = null, firstI = null, sellNo = 0;
-      const trades = [], marks = [], eq = new Array(td.length).fill(1);
+      let buyI = [], buyP = [];   // 每一批的買進日與買價，與 units 對應（賣出時取最後買的一批）
+      const trades = [], marks = [], legs = [], eq = new Array(td.length).fill(1);   // legs：每一批的買→賣波段，供畫盈虧虛線
       const qty = () => units.reduce((a, u) => a + u, 0);
       const exitAll = (i, price, stop) => {
         const q = qty(), avg = cost / q;
         trades.push({ ei: firstI, xi: i, ret: price / avg - 1, stop, frac: 1 });
-        cash += q * price; units = []; cost = 0; lastSell = null; firstI = null; sellNo = 0;
+        buyI.forEach((bi, k) => legs.push({ ei: bi, xi: i, ret: price / buyP[k] - 1 }));
+        cash += q * price; units = []; cost = 0; lastSell = null; firstI = null; sellNo = 0; buyI = []; buyP = [];
       };
       td.forEach((d, i) => {
         const mark = () => { eq[i] = cash + qty() * d.close; };
@@ -675,7 +677,7 @@
           const amt = Math.min(cash, (cash + qty() * d.close) / lots);
           if (amt > 1e-9) {
             if (!units.length) firstI = i;
-            units.push(amt / d.close); cash -= amt; cost += amt; exec = true; lot = units.length;
+            units.push(amt / d.close); buyI.push(i); buyP.push(d.close); cash -= amt; cost += amt; exec = true; lot = units.length;
           }
         } else if (type === 'short' && units.length) {
           const avg = cost / qty();
@@ -687,6 +689,7 @@
               const u = qty() / units.length;
               trades.push({ ei: firstI, xi: i, ret: d.close / avg - 1, frac: 1 / units.length });
               cash += u * d.close; cost -= avg * u; units.pop(); lastSell = d.close;
+              legs.push({ ei: buyI.pop(), xi: i, ret: d.close / buyP.pop() - 1 });
             }
           }
         }
@@ -695,7 +698,7 @@
       });
       const q = qty();
       const hold = units.length ? { i: firstI, price: cost / q, lots: units.length } : null;
-      return { marks, trades, hold, eq };
+      return { marks, trades, legs, hold, eq };
     };
 
     // 記住使用者上次的選擇（只存在此瀏覽器）；讀不到或值不合法時用預設值
@@ -838,7 +841,7 @@
                 <path d={mk('ema50')} fill="none" stroke="#f87171" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
                 <path d={mk('ema200')} fill="none" stroke="#22c55e" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
                 <path d={mk('close')} fill="none" stroke="#e5e7eb" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-                {lots === 1 && trades.filter(t => t.ei >= base).map((t, k) => (
+                {res.legs.filter(t => t.ei >= base).map((t, k) => (
                   <line key={k} x1={fx(t.ei) * W} y1={fy(td[t.ei].close) * H} x2={fx(t.xi) * W} y2={fy(td[t.xi].close) * H}
                     stroke={t.ret > 0 ? '#ef4444' : '#22c55e'} strokeWidth="1.5" strokeDasharray="5 3" vectorEffect="non-scaling-stroke" />
                 ))}
@@ -879,7 +882,7 @@
             {!res.hold ? '目前空手。' : lots === 1
               ? `目前持有中（${td[res.hold.i].date} 以 ${td[res.hold.i].close.toFixed(0)} 買進，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}）。`
               : `目前持有 ${res.hold.lots}／${lots} 批（${td[res.hold.i].date} 起），平均成本 ${res.hold.price.toFixed(0)}，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}。`}
-            {' '}規則：BB(22, 2) 收盤自下軌之下回到之上＝BB Long、自上軌之上回到之下＝BB Short（與 TradingView 該指標在 TXF1! 日線的訊號逐根比對相符；本雷達用加權指數，個別日期可能與期貨差一兩天）；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有遇 Long，或被濾網擋下）。以收盤價計，未含手續費與證交稅，僅供學習參考。
+            {' '}規則：BB(22, 2) 收盤自下軌之下回到之上＝BB Long、自上軌之上回到之下＝BB Short（與 TradingView 該指標在 TXF1! 日線的訊號逐根比對相符；本雷達用加權指數，個別日期可能與期貨差一兩天）；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有已滿或未達加碼／賣出條件，或被濾網擋下）；虛線＝每一批從買點到賣點的波段，紅＝獲利、綠＝虧損。以收盤價計，未含手續費與證交稅，僅供學習參考。
           </p>
         </div>
       );
