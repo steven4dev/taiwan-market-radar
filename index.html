@@ -84,7 +84,7 @@
     // ==========================================
 
     // 版本編號：v 日期.當日第幾次發佈。每次修改 index.html 並推上線前請遞增（日期變更時從 .01 重算）
-    const APP_VERSION = 'v 20261123.01';
+    const APP_VERSION = 'v 20261123.02';
 
     const MODULE_CONFIG = {
       M1: { weight: 0.16, title: '多空分水嶺',   icon: 'Milestone' },
@@ -134,6 +134,23 @@
       });
     };
     const diffOrNull = (a, b) => (a == null || b == null ? null : a - b);
+    // 指數移動平均（EMA），自第一個有效值起算。只供策略模組（M12 回測、M14）在「均線類型＝EMA」時使用；評分模組固定 SMA
+    const calculateEMAKey = (data, period, key = 'close', outKey) => {
+      const k = 2 / (period + 1);
+      let e = null;
+      return data.map(item => {
+        const v = item[key];
+        if (v != null && Number.isFinite(v)) e = e == null ? v : v * k + e * (1 - k);
+        return { ...item, [outKey]: e };
+      });
+    };
+    const calculateMACDCustomEMA = (data, shortN, longN, signalN) => {
+      let res = calculateEMAKey(data, shortN, 'close', 'emaS');
+      res = calculateEMAKey(res, longN, 'close', 'emaL');
+      res = res.map(d => ({ ...d, difE: diffOrNull(d.emaS, d.emaL) }));
+      res = calculateEMAKey(res, signalN, 'difE', 'sigE');
+      return res.map(d => ({ ...d, histE: diffOrNull(d.difE, d.sigE) }));
+    };
 
     const calculateMACD = (data) => {
       let res = calculateMA(data, 12, 'close', 'ma12');
@@ -472,6 +489,36 @@
         ))}
       </div>
     );
+    // 策略模組（M12 回測、M14）共用的均線類型：SMA／EMA，切換後兩個模組同步，並記住上次選擇（評分模組固定 SMA）
+    const maStore = (() => {
+      let v = 'sma';
+      try { const x = localStorage.getItem('strategy-ma'); if (x === 'sma' || x === 'ema') v = x; } catch (e) {}
+      return {
+        subs: new Set(),
+        get: () => v,
+        set(x) { v = x; try { localStorage.setItem('strategy-ma', x); } catch (e) {} this.subs.forEach(f => f(x)); },
+      };
+    })();
+    const useSyncMA = () => {
+      const [v, setV] = useState(maStore.get());
+      useEffect(() => { maStore.subs.add(setV); return () => { maStore.subs.delete(setV); }; }, []);
+      return [v, x => maStore.set(x)];
+    };
+    // 兩行式選項按鈕：上行獎牌＋名稱、下行報酬率；opts＝[[值, 名稱, 報酬%或 null], …]，同值並列，全為 null 時不顯示獎牌
+    const MEDAL3 = ['🏆', '🥈', '🥉', '4'];
+    const OptButtons = ({ value, onChange, opts }) => {
+      const vals = opts.map(o => o[2]);
+      const any = vals.some(v => v != null);
+      const rank = v => 1 + vals.filter(x => x != null && v != null && x > v + 1e-9).length;
+      return opts.map(([v, l, r]) => (
+        <button key={v} onClick={() => onChange(v)}
+          className={`px-1 py-1 rounded-md text-xs border text-center leading-tight transition-colors ${value === v ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+          <div className="whitespace-nowrap">{any && r != null ? MEDAL3[rank(r) - 1] + ' ' : ''}{l}</div>
+          <div className={`whitespace-nowrap text-[11px] ${r == null ? 'text-gray-500' : r >= 0 ? 'text-red-300' : 'text-green-300'}`}>{r == null ? '—' : `${r >= 0 ? '+' : ''}${r.toFixed(1)}%`}</div>
+        </button>
+      ));
+    };
+
     // 自最新日期往前推 years 年的截止日（字串 YYYY-MM-DD）
     const cutoffDate = (lastDate, years) => {
       const d = new Date(lastDate);
@@ -530,8 +577,9 @@
       const { useMemo } = React;
       const [years, setYears] = useSyncYears();
       const [strat] = useM12Strategy();
-      const sigKey = strat === 'conv' ? 'sigConv' : 'sigCross';
-      const WARM = 140;                       // 慢線 SMA130 暖機期，其前的訊號不計
+      const [ma, setMa] = useSyncMA();        // 回測用的均線類型（摘要與評分固定 SMA）
+      const sigBase = strat === 'conv' ? 'sigConv' : 'sigCross';
+      const WARM = 140;                       // 慢線 130 暖機期，其前的訊號不計
       const n = td.length;
       // 日 = 交易日筆數；年 = 日曆年限（自最新日期往前推 N 年）
       const calcSize = r => {
@@ -549,7 +597,9 @@
       const cur = { years };
       const size = Math.max(2, Math.min(calcSize(cur), n - WARM));
 
-      const { view, trades, stats, bh, openTrade } = useMemo(() => {
+      // 依均線類型計算回測；同時算 SMA 與 EMA 兩版，供按鈕排名
+      const both = useMemo(() => Object.fromEntries(['sma', 'ema'].map(m => [m, (() => {
+        const sigKey = sigBase + (m === 'ema' ? 'E' : ''), histKey = m === 'ema' ? 'histE' : 'hist';
         const viewStart = n - size;
         const raw = [];
         let oi = null;
@@ -581,8 +631,9 @@
           best: Math.max(...rets), worst: Math.min(...rets),
         } : null;
         const bh = (td[n - 1].close / td[viewStart].close - 1) * 100;   // 區間首日收盤買進、持有到最新一日
-        return { view: td.slice(viewStart).map(d => ({ ...d, signal: d[sigKey] })), trades, stats, bh, openTrade: trades.find(t => t.open) || null };
-      }, [td, size, sigKey]);
+        return { view: td.slice(viewStart).map(d => ({ ...d, signal: d[sigKey], hist: d[histKey] })), trades, stats, bh, openTrade: trades.find(t => t.open) || null };
+      })()])), [td, size, sigBase]);
+      const { view, trades, stats, bh, openTrade } = both[ma];
 
       const sg = v => (v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
       const rc = v => (v == null ? 'text-gray-400' : v > 0 ? 'text-red-400' : 'text-green-400');
@@ -599,6 +650,10 @@
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <p className="text-xs text-gray-500">統計＝區間內「賣出」的已平倉波段（依上方所選策略）· 收盤價計，未含手續費與證交稅</p>
             <RangeButtons value={years} onChange={setYears} />
+          </div>
+          <p className="text-xs text-gray-500 mb-1">回測均線類型（與 M14 同步；獎牌＝區間累計報酬排名；摘要與評分固定 SMA）</p>
+          <div className="grid grid-cols-2 gap-1 mb-3">
+            <OptButtons value={ma} onChange={setMa} opts={[['sma', 'SMA', both.sma.stats ? both.sma.stats.total : null], ['ema', 'EMA', both.ema.stats ? both.ema.stats.total : null]]} />
           </div>
           {stats ? (
             <div className={`grid grid-cols-2 ${expanded ? 'md:grid-cols-6' : ''} gap-2 mb-2`}>
@@ -655,7 +710,9 @@
     //   遇 BB Short 賣一批（先進先出：買1 對 賣1、買2 對 賣2，以該批實際股數賣出、成本依平均成本扣除）：
     //   同一輪中第一次賣出須「高於平均成本」，之後每次須「高於上次賣價」，否則不賣；全數賣完後重新計算。
     //   停損以平均成本計，觸發時全數出場。另記錄每日帳戶權益 eq（總資金 1 起算，含持有中），供分批時計算報酬。
-    const runM14Strategy = (td, filter, stopPct = 0, entry = 'normal', lots = 1) => {
+    //   opt.ma：'sma'（預設）／'ema' 決定濾網與自動進場用的 200 日均線；opt.bb：22（預設）／20 決定布林通道長度。
+    const runM14Strategy = (td, filter, stopPct = 0, entry = 'normal', lots = 1, opt = {}) => {
+      const TK = opt.ma === 'ema' ? 'ema200' : 'sma200', LK = opt.bb === 20 ? 'bbL20' : 'bbL', UK = opt.bb === 20 ? 'bbU20' : 'bbU';
       let cash = 1, units = [], cost = 0, lastSell = null, firstI = null, sellNo = 0, buyNo = 0;   // buyNo／sellNo：本輪第幾次買／賣，使 買N 對 賣N
       let buyI = [], buyP = [];   // 每一批的買進日與買價，與 units 對應（賣出時取最早買的一批）
       const trades = [], marks = [], legs = [], eq = new Array(td.length).fill(1);   // legs：每一批的買→賣波段，供畫盈虧虛線
@@ -673,16 +730,16 @@
           marks.push({ i, type: 'stop', exec: true });
           return mark();
         }
-        if (i === 0 || d.bbL == null) return mark();
+        if (i === 0 || d[LK] == null) return mark();
         const p = td[i - 1];
-        if (p.bbL == null) return mark();
+        if (p[LK] == null) return mark();
         let type = null;
-        const early = entry === 'early' || (entry === 'auto' && d.sma200 != null && d.close >= d.sma200);
-        if (early ? (p.close >= p.bbL && d.close < d.bbL) : (p.close <= p.bbL && d.close > d.bbL)) type = 'long';
-        else if (p.close >= p.bbU && d.close < d.bbU) type = 'short';
+        const early = entry === 'early' || (entry === 'auto' && d[TK] != null && d.close >= d[TK]);
+        if (early ? (p.close >= p[LK] && d.close < d[LK]) : (p.close <= p[LK] && d.close > d[LK])) type = 'long';
+        else if (p.close >= p[UK] && d.close < d[UK]) type = 'short';
         if (!type) return mark();
         let exec = false, lot = 0;
-        if (type === 'long' && (!filter || (d.sma200 != null && d.close >= d.sma200))
+        if (type === 'long' && (!filter || (d[TK] != null && d.close >= d[TK]))
             && (!units.length || (units.length < lots && d.close < cost / qty()))) {
           const amt = Math.min(cash, (cash + qty() * d.close) / lots);
           if (amt > 1e-9) {
@@ -736,14 +793,22 @@
       const [lots, setLots] = usePersist('m14-lots', 2, x => [1, 2, 3].includes(x));                            // 1＝一般（全進全出）；2／3＝進 N 出 N
       const STOP_PCT = 0.05;
       // 三種分批模式同時計算，供冠亞季軍排名；圖表與統計顯示所選模式
-      const resAll = useMemo(() => [1, 2, 3].map(N => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry, N)), [td, filter, stop, entry]);
+      const [ma, setMa] = useSyncMA();                                                            // 均線類型（與 M12 同步；摘要與燈號固定 SMA）
+      const [bb, setBb] = usePersist('m14-bb', 22, x => [20, 22].includes(x));                   // 布林長度
+      const MAN = ma === 'ema' ? 'EMA' : 'SMA', K50 = ma + '50', K200 = ma + '200';
+      const LK = bb === 20 ? 'bbL20' : 'bbL', UK = bb === 20 ? 'bbU20' : 'bbU';
+      const runOpt = (N, o) => runM14Strategy(td, filter, stop ? STOP_PCT : 0, entry, N, o);
+      const resAll = useMemo(() => [1, 2, 3].map(N => runOpt(N, { ma, bb })), [td, filter, stop, entry, ma, bb]);
       const res = resAll[lots - 1];
+      // 均線類型、布林長度各自的另一個選項（其餘設定相同），供按鈕排名
+      const resMa = useMemo(() => ({ [ma]: res, [ma === 'sma' ? 'ema' : 'sma']: runOpt(lots, { ma: ma === 'sma' ? 'ema' : 'sma', bb }) }), [res, td, filter, stop, entry, lots, ma, bb]);
+      const resBb = useMemo(() => ({ [bb]: res, [bb === 22 ? 20 : 22]: runOpt(lots, { ma, bb: bb === 22 ? 20 : 22 }) }), [res, td, filter, stop, entry, lots, ma, bb]);
       const cut = cutoffDate(td[td.length - 1].date, years);
       const base = Math.max(0, td.findIndex(d => d.date >= cut));
       const view = td.slice(base), n = view.length;
       const hv = useChartHover(n, 'line');
       const W = 1000, H = 300;
-      const vals = view.flatMap(d => [d.close, d.bbU, d.bbL]).filter(v => v != null);   // 縮放只看價格與布林，SMA 超出範圍時被裁切
+      const vals = view.flatMap(d => [d.close, d[UK], d[LK]]).filter(v => v != null);   // 縮放只看價格與布林，均線超出範圍時被裁切
       const mn = Math.min(...vals), mx = Math.max(...vals), pd = (mx - mn) * 0.05 || 1;
       const lo = mn - pd, hi = mx + pd;
       const fx = i => (i - base) / (n - 1);
@@ -781,10 +846,10 @@
       const fr = [0, 0.25, 0.5, 0.75, 1];
       const tickIdx = Array.from({ length: 5 }, (_, k) => Math.round(k * (n - 1) / 4));   // 手機只顯示頭、中、尾
       const TOGGLES = [
-        { label: 'SMA200 濾網', on: filter, set: setFilter, desc: '收盤在 SMA200 之上才買' },
+        { label: `${MAN}200 濾網`, on: filter, set: setFilter, desc: `收盤在 ${MAN}200 之上才買` },
         { label: '停損 5%', on: stop, set: setStop, desc: '收盤較買進價（分批時為平均成本）跌 5% 全數出場' },
         { label: '提早進場', on: entry === 'early', set: () => setEntry(e => (e === 'early' ? 'normal' : 'early')), desc: '收盤首次跌破下軌就買（逆勢接刀，可自行搭配停損）' },
-        { label: '自動進場', on: entry === 'auto', set: () => setEntry(e => (e === 'auto' ? 'normal' : 'auto')), desc: 'SMA200 之上（多頭）提早買、之下（空頭）等穿回下軌才買；與提早進場二選一' },
+        { label: '自動進場', on: entry === 'auto', set: () => setEntry(e => (e === 'auto' ? 'normal' : 'auto')), desc: `${MAN}200 之上（多頭）提早買、之下（空頭）等穿回下軌才買；與提早進場二選一` },
       ];
 
       return (
@@ -809,6 +874,20 @@
             ))}
           </p>
           <p className="text-xs text-gray-500 mb-1">分批（獎牌＝所選區間帳戶報酬排名）</p>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">均線類型（與 M12 同步）</p>
+              <div className="grid grid-cols-2 gap-1">
+                <OptButtons value={ma} onChange={setMa} opts={[['sma', 'SMA', acct(resMa.sma) * 100], ['ema', 'EMA', acct(resMa.ema) * 100]]} />
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-1">布林長度</p>
+              <div className="grid grid-cols-2 gap-1">
+                <OptButtons value={bb} onChange={setBb} opts={[[20, '20 日', acct(resBb[20]) * 100], [22, '22 日', acct(resBb[22]) * 100]]} />
+              </div>
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-1 mb-1">
             {LOT_OPTS.map(([v, l], k) => (
               <button key={v} onClick={() => setLots(v)}
@@ -840,18 +919,18 @@
                   return <>
                     <div className="text-gray-300 font-bold">{d.date}{mk ? `　${mk.exec ? lotLbl(mk) : `${mk.early ? '提早買' : `BB ${mk.type === 'long' ? 'Long' : 'Short'}`}（未成交）`}` : ''}</div>
                     <TipRow color="#e5e7eb" name="收盤" value={f0(d.close)} />
-                    <TipRow color="#f87171" name="SMA50" value={f0(d.sma50)} />
-                    <TipRow color="#22c55e" name="SMA200" value={f0(d.sma200)} />
-                    <TipRow color="#a78bfa" name="布林上／下軌" value={`${f0(d.bbU)}／${f0(d.bbL)}`} />
+                    <TipRow color="#f87171" name={`${MAN}50`} value={f0(d[K50])} />
+                    <TipRow color="#22c55e" name={`${MAN}200`} value={f0(d[K200])} />
+                    <TipRow color="#a78bfa" name={`布林(${bb}) 上／下軌`} value={`${f0(d[UK])}／${f0(d[LK])}`} />
                   </>;
                 })()}
               </HoverMark>
               <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-full block overflow-hidden">
                 {fr.map(f => <line key={f} x1="0" x2={W} y1={f * H} y2={f * H} stroke="#374151" strokeWidth="1" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />)}
-                <path d={mk('bbU')} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-                <path d={mk('bbL')} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-                <path d={mk('sma50')} fill="none" stroke="#f87171" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
-                <path d={mk('sma200')} fill="none" stroke="#22c55e" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+                <path d={mk(UK)} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+                <path d={mk(LK)} fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+                <path d={mk(K50)} fill="none" stroke="#f87171" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+                <path d={mk(K200)} fill="none" stroke="#22c55e" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
                 <path d={mk('close')} fill="none" stroke="#e5e7eb" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 {res.legs.filter(t => t.ei >= base).map((t, k) => (
                   <line key={k} x1={fx(t.ei) * W} y1={fy(td[t.ei].close) * H} x2={fx(t.xi) * W} y2={fy(td[t.xi].close) * H}
@@ -867,7 +946,9 @@
                     <div style={{ width: 11, height: 11, borderRadius: '50%', background: m.exec ? col : '#111827', border: `2.5px solid ${col}` }} />
                     {showLbl && m.exec && (
                       <span className="absolute left-1/2 text-[10px] font-bold rounded px-1 whitespace-nowrap"
-                        style={{ background: m.type === 'stop' ? '#fb923c' : '#facc15', color: '#111827', transform: 'translateX(-50%)', ...(isL ? { top: 14 } : { bottom: 14 }) }}>
+                        style={{ background: m.type === 'stop' ? '#fb923c' : '#facc15', color: '#111827', ...(isL ? { top: 14 } : { bottom: 14 }),
+                          // 靠近圖表兩端時標籤往內側對齊，避免超出卡片
+                          transform: fx(m.i) > 0.9 ? 'translateX(calc(-100% + 6px))' : fx(m.i) < 0.1 ? 'translateX(-6px)' : 'translateX(-50%)' }}>
                         {lotLbl(m)}
                       </span>
                     )}
@@ -894,7 +975,7 @@
             {!res.hold ? '目前空手。' : lots === 1
               ? `目前持有中（${td[res.hold.i].date} 以 ${td[res.hold.i].close.toFixed(0)} 買進，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}）。`
               : `目前持有 ${res.hold.lots}／${lots} 批（${td[res.hold.i].date} 起），平均成本 ${res.hold.price.toFixed(0)}，浮動 ${sg((td[td.length - 1].close / res.hold.price - 1) * 100)}。`}
-            {' '}規則：BB(22, 2) 收盤自下軌之下回到之上＝BB Long、自上軌之上回到之下＝BB Short（與 TradingView 該指標在 TXF1! 日線的訊號逐根比對相符；本雷達用加權指數，個別日期可能與期貨差一兩天）；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有已滿或未達加碼／賣出條件，或被濾網擋下）；虛線＝每一批從買點到賣點的波段，紅＝獲利、綠＝虧損。以收盤價計，未含手續費與證交稅，僅供學習參考。
+            {' '}規則：BB({bb}, 2) 收盤自下軌之下回到之上＝BB Long、自上軌之上回到之下＝BB Short（BB(22, 2) 與 TradingView 該指標在 TXF1! 日線的訊號逐根比對相符；本雷達用加權指數，個別日期可能與期貨差一兩天）；實心圓＝實際進出場、空心淡色＝未成交（空手遇 Short、持有已滿或未達加碼／賣出條件，或被濾網擋下）；虛線＝每一批從買點到賣點的波段，紅＝獲利、綠＝虧損。以收盤價計，未含手續費與證交稅，僅供學習參考。
           </p>
         </div>
       );
@@ -1175,8 +1256,8 @@
         return d.toISOString().slice(0, 10);
       }, [rows, years]);
       const DAY = 864e5;
-      const PRESETS = [[30, 90], [22, 60], [60, 180]];
-      const [pi, setPi] = usePersist('m13-preset', 0, x => [0, 1, 2].includes(x));                      // 記住上次選的均線參數
+      const PRESETS = [[30, 90], [22, 60], [60, 180], [20, 60]];   // 新增項目放最後，已記住的序號不會錯位；畫面依短均線排序
+      const [pi, setPi] = usePersist('m13-preset', 0, x => [0, 1, 2, 3].includes(x));                      // 記住上次選的均線參數
       const [MA_S, MA_L] = PRESETS[pi];
       const withMa = useMemo(() => {
         const t = rows.map(d => Date.parse(d.date));
@@ -1387,14 +1468,15 @@
           </div>
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <span className="text-xs text-gray-500 w-full sm:w-auto">均線參數</span>
-            <div className="grid grid-cols-3 gap-1 w-full sm:flex sm:w-auto">
+            <div className="grid grid-cols-4 gap-1 w-full sm:w-auto sm:flex">
               {PRESETS.map((pr, k) => [pr, k]).sort((x, y) => x[0][0] - y[0][0]).map(([[a, b], k]) => {
                 const g = gridOf(asset, k);
                 const mi = rankPresets.findIndex(x => x.pk === k);
                 return (
                   <button key={k} title={`${a} 日均線穿越 ${b} 日均線：金叉買進、死叉賣出${g ? `\n此區間（${assetLabel}）累計 ${pctTxt(g.total)}，已平倉 ${g.n} 次` : ''}`} onClick={() => setPi(k)}
-                    className={`px-1 sm:px-3 py-1 rounded-md text-xs text-center border whitespace-nowrap transition-colors ${pi === k ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
-                    {mi >= 0 && mi < 3 ? MEDALS[mi] + ' ' : ''}{a}/{b}{g && g.n > 0 && <span className={`ml-1 text-[10px] ${g.total >= 0 ? 'text-red-300' : 'text-green-300'}`}>{pctTxt(g.total)}</span>}
+                    className={`px-1 sm:px-3 py-1 rounded-md text-xs text-center border leading-tight transition-colors ${pi === k ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-white'}`}>
+                    <div className="whitespace-nowrap">{mi >= 0 && mi < 3 ? MEDALS[mi] + ' ' : ''}{a}/{b}</div>
+                    <div className={`whitespace-nowrap text-[11px] ${g && g.n > 0 ? (g.total >= 0 ? 'text-red-300' : 'text-green-300') : 'text-gray-500'}`}>{g && g.n > 0 ? pctTxt(g.total) : '—'}</div>
                   </button>
                 );
               })}
@@ -2861,19 +2943,27 @@
             //  conv  新：綠柱（負）連續收斂第 3 根買進；持有時紅柱（正）連續收斂第 3 根賣出（收斂＝同色柱比前一根短，中途變長重新計數）
             //  cross 舊：柱體由負轉正買進；由正轉負賣出
             const CONV_BARS = 3;
-            let negRun = 0, posRun = 0, holdC = false, holdX = false;
-            const td = calculateKD(calculateMACDCustom(base, 9, 12, 130)).map((d, i, a) => {
-              const ph = i > 0 ? a[i - 1].hist : d.hist;
-              negRun = (d.hist < 0 && ph < 0 && Math.abs(d.hist) < Math.abs(ph)) ? negRun + 1 : 0;
-              posRun = (d.hist > 0 && ph > 0 && Math.abs(d.hist) < Math.abs(ph)) ? posRun + 1 : 0;
-              let sigConv = null, sigCross = null;
-              if (!holdC && negRun === CONV_BARS) { sigConv = 'buy'; holdC = true; }
-              else if (holdC && posRun === CONV_BARS) { sigConv = 'sell'; holdC = false; }
-              // 柱體尚未成形（SMA 暖機期為 null）時不判斷，避免 null 被當成 0 產生假訊號
-              if (!holdX && ph != null && d.hist != null && ph <= 0 && d.hist > 0) { sigCross = 'buy'; holdX = true; }
-              else if (holdX && ph != null && d.hist != null && ph >= 0 && d.hist < 0) { sigCross = 'sell'; holdX = false; }
-              return { ...d, sigConv, sigCross };
-            });
+            // 依指定柱體欄位（hist＝SMA 版、histE＝EMA 版）產生兩種策略的訊號，並回傳最後的持倉狀態
+            const genSignals = (arr, hk) => {
+              let negRun = 0, posRun = 0, holdC = false, holdX = false;
+              const sig = arr.map((d, i) => {
+                const h = d[hk], ph = i > 0 ? arr[i - 1][hk] : h;
+                negRun = (h < 0 && ph < 0 && Math.abs(h) < Math.abs(ph)) ? negRun + 1 : 0;
+                posRun = (h > 0 && ph > 0 && Math.abs(h) < Math.abs(ph)) ? posRun + 1 : 0;
+                let conv = null, cross = null;
+                if (!holdC && negRun === CONV_BARS) { conv = 'buy'; holdC = true; }
+                else if (holdC && posRun === CONV_BARS) { conv = 'sell'; holdC = false; }
+                // 柱體尚未成形（暖機期為 null）時不判斷，避免 null 被當成 0 產生假訊號
+                if (!holdX && ph != null && h != null && ph <= 0 && h > 0) { cross = 'buy'; holdX = true; }
+                else if (holdX && ph != null && h != null && ph >= 0 && h < 0) { cross = 'sell'; holdX = false; }
+                return { conv, cross };
+              });
+              return { sig, negRun, posRun, holdC, holdX };
+            };
+            const tdRaw = calculateKD(calculateMACDCustomEMA(calculateMACDCustom(base, 9, 12, 130), 9, 12, 130));
+            const gS = genSignals(tdRaw, 'hist'), gE = genSignals(tdRaw, 'histE');
+            const { negRun, posRun, holdC, holdX } = gS;   // 摘要與評分固定用 SMA 版
+            const td = tdRaw.map((d, i) => ({ ...d, sigConv: gS.sig[i].conv, sigCross: gS.sig[i].cross, sigConvE: gE.sig[i].conv, sigCrossE: gE.sig[i].cross }));
             const n = td.length;
             const last = td[n - 1], prev = td[n - 2];
 
@@ -3025,7 +3115,7 @@
             setModuleData(prev => ({...prev, M13: {
               status: 'info',
               plain: `以預設的 30／90 日均線來看，外資持股的短均線目前在長均線${above ? '之上' : '之下'}，代表外資持股趨勢${above ? '向上，策略處於持有（金叉後）' : '向下，策略處於空手（死叉後）'}${crossAt ? `，上一次交叉在 ${crossAt}` : ''}。這是跟著外資長線進出的擇時參考，不計入評分。`,
-              summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（${last.date}）。以持股比重的短均線（22／30／60 日）由下穿越長均線（60／90／180 日）為金叉買進、由上穿越為死叉賣出，可切換均線參數與買進標的（加權指數、ETF、個股、正 2），圖上標示金叉死叉、買賣點與波段報酬，並與買進持有對照。回測僅供參考，不計入評分。`,
+              summary: `外資持股占上市總市值 ${last.ratio.toFixed(2)}%（${last.date}）。以持股比重的短均線（20／22／30／60 日）由下穿越長均線（60／90／180 日）為金叉買進、由上穿越為死叉賣出，可切換均線參數與買進標的（加權指數、ETF、個股、正 2），圖上標示金叉死叉、買賣點與波段報酬，並與買進持有對照。回測僅供參考，不計入評分。`,
               chartTitle: '標的 K 線＋買賣標記（上）／外資持股比重與均線（下）· 半年～15 年（與 M12、M14 同步）',
               renderBlock: (ex, head) => <ForeignTimingChart rows={rows} expanded={ex} head={head} />,
             }}));
@@ -3051,6 +3141,9 @@
 
             let td = calculateMA(base, 50, 'close', 'sma50');
             td = calculateMA(td, 200, 'close', 'sma200');
+            // 策略回測可選 EMA（摘要與燈號固定用 SMA）
+            td = calculateEMAKey(td, 50, 'close', 'ema50');
+            td = calculateEMAKey(td, 200, 'close', 'ema200');
             td = calculateMACD(td);
             // RSI 14（Wilder 平滑）
             let avgG = 0, avgL = 0;
@@ -3061,13 +3154,17 @@
               else { avgG = (avgG * 13 + g) / 14; avgL = (avgL * 13 + l) / 14; }
               return { ...d, rsi: i < 14 ? null : (avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)) };
             });
-            // 布林通道 22 日、2 倍標準差（母體標準差；參數取自 TradingView 指標設定）
+            // 布林通道 2 倍標準差（母體標準差）：22 日（預設，取自 TradingView 指標設定）→ bbU／bbL；20 日（國際慣用）→ bbU20／bbL20
+            const bbOf = (a, i, len) => {
+              if (i < len - 1) return [null, null];
+              const w = a.slice(i - len + 1, i + 1).map(x => x.close);
+              const m = w.reduce((s, v) => s + v, 0) / len;
+              const sd = Math.sqrt(w.reduce((s, v) => s + (v - m) ** 2, 0) / len);
+              return [m + 2 * sd, m - 2 * sd];
+            };
             td = td.map((d, i, a) => {
-              if (i < 21) return { ...d, bbU: null, bbL: null };
-              const w = a.slice(i - 21, i + 1).map(x => x.close);
-              const m = w.reduce((s, v) => s + v, 0) / 22;
-              const sd = Math.sqrt(w.reduce((s, v) => s + (v - m) ** 2, 0) / 22);
-              return { ...d, bbU: m + 2 * sd, bbL: m - 2 * sd };
+              const [u22, l22] = bbOf(a, i, 22), [u20, l20] = bbOf(a, i, 20);
+              return { ...d, bbU: u22, bbL: l22, bbU20: u20, bbL20: l20 };
             });
 
             const n = td.length, last = td[n - 1], prev20 = td[n - 21];
@@ -3106,11 +3203,11 @@
                   : last.close > last.bbU ? '收盤衝到布林上軌之上，短線漲多過熱，要等收盤回到上軌之下（BB Short）才算賣出訊號。' : ''),
               alignedData: td.slice(-60).map(d => ({ date: d.date, value: d.close - d.sma200 })),
               summary: `${trendTxt}。收盤 ${last.close.toFixed(0)}，SMA200 ${last.sma200.toFixed(0)}（${dist200 >= 0 ? '+' : ''}${dist200.toFixed(1)}%，${slopeUp ? '向上' : '向下'}），SMA50 ${last.sma50.toFixed(0)}（SMA50 在 SMA200 ${last.sma50 > last.sma200 ? '上方' : '下方'}）。MACD 柱體${last.osc > 0 ? '為正' : '為負'}。${rsiTxt}${bbTxt}${crossTxt}${sigTxt}此模組僅供趨勢參考，不計入評分。`,
-              chartTitle: '收盤 / SMA50 / SMA200 / 布林通道 · BB Long／BB Short 標記與進出場',
+              chartTitle: '收盤 / 50、200 日均線 / 布林通道（依所選均線類型與布林長度）· 買賣標記與進出場',
               legend: (<>
                 <span className="text-gray-200 whitespace-nowrap">— 收盤</span>
-                <span className="text-red-400 whitespace-nowrap">— SMA50</span>
-                <span className="text-green-400 whitespace-nowrap">— SMA200</span>
+                <span className="text-red-400 whitespace-nowrap">— 50 日均線</span>
+                <span className="text-green-400 whitespace-nowrap">— 200 日均線</span>
                 <span className="text-purple-400 whitespace-nowrap">┄ 布林上下軌</span>
                 <span className="text-red-400 whitespace-nowrap">●買進</span>
                 <span className="text-green-400 whitespace-nowrap">●賣出</span>
